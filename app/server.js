@@ -613,18 +613,72 @@ route('POST', '/api/me/update', async (req, res, body) => {
 });
 
 // ---- Geocoding (OpenStreetMap Nominatim — ฟรี ไม่ต้องมี API key) ----
+function haversine(la1, lo1, la2, lo2) {
+  const R = 6371000, toR = (x) => x * Math.PI / 180;
+  const dLa = toR(la2 - la1), dLo = toR(lo2 - lo1);
+  const a = Math.sin(dLa / 2) ** 2 + Math.cos(toR(la1)) * Math.cos(toR(la2)) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+// สร้างที่อยู่แบบไทยเรียงลำดับจากส่วนประกอบ (บ้านเลขที่ ถนน ตำบล อำเภอ จังหวัด รหัสไปรษณีย์)
+function formatThaiAddress(a) {
+  if (!a) return null;
+  const parts = [];
+  const line1 = [a.house_number, a.road || a.pedestrian || a.footway].filter(Boolean).join(' ');
+  if (line1) parts.push(line1);
+  const village = a.village || a.hamlet || a.neighbourhood || a.suburb;
+  if (village && !parts.join(' ').includes(village)) parts.push(village);
+  const tambon = a.subdistrict || a.quarter || a.city_district;
+  if (tambon) parts.push('ต.' + tambon);
+  const amphoe = a.county || a.city || a.town || a.municipality;
+  if (amphoe) parts.push(amphoe.startsWith('อำเภอ') || amphoe.startsWith('เขต') ? amphoe : ('อ.' + amphoe));
+  const province = a.province || a.state;
+  if (province) parts.push(province.startsWith('จังหวัด') ? province : ('จ.' + province));
+  if (a.postcode) parts.push(a.postcode);
+  return parts.length ? parts.join(' ') : null;
+}
+// หา "จุดสังเกต" ที่ใกล้ที่สุดในรัศมี 150 เมตร (ร้าน/อาคาร/สถานที่ที่มีชื่อ) เพื่อเติมให้ที่อยู่ชัดขึ้น
+async function nearestLandmark(lat, lng) {
+  const ql = `[out:json][timeout:15];nwr(around:150,${lat},${lng})["name"]["highway"!~"."]["boundary"!~"."];out center 40;`;
+  const body = 'data=' + encodeURIComponent(ql);
+  try {
+    const r = await httpsJson({
+      hostname: 'overpass-api.de', path: '/api/interpreter', method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json', 'Content-Length': Buffer.byteLength(body), 'User-Agent': 'FlashSmokeDelivery/1.0' }
+    }, body);
+    const els = (r.json && r.json.elements) || [];
+    let best = null;
+    for (const e of els) {
+      const la = e.lat != null ? e.lat : (e.center && e.center.lat);
+      const lo = e.lon != null ? e.lon : (e.center && e.center.lon);
+      const name = e.tags && e.tags.name;
+      if (la == null || lo == null || !name) continue;
+      const d = haversine(lat, lng, la, lo);
+      if (!best || d < best.dist) best = { name: String(name).slice(0, 50), dist: Math.round(d) };
+    }
+    return best;
+  } catch { return null; }
+}
 route('GET', '/api/geocode/reverse', async (req, res) => {
   const q = query(req);
   const lat = Number(q.get('lat')), lng = Number(q.get('lng'));
   if (!isFinite(lat) || !isFinite(lng)) return send(res, 400, { error: 'พิกัดไม่ถูกต้อง' });
   try {
-    const r = await httpsJson({
-      hostname: 'nominatim.openstreetmap.org',
-      path: `/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=th&zoom=18&addressdetails=1`,
-      method: 'GET',
-      headers: { 'User-Agent': 'FlashSmokeDelivery/1.0 (+https://flash-smoke.onrender.com)' }
-    });
-    send(res, 200, { address: (r.json && r.json.display_name) || null });
+    const [nomi, landmark] = await Promise.all([
+      httpsJson({
+        hostname: 'nominatim.openstreetmap.org',
+        path: `/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=th&zoom=18&addressdetails=1`,
+        method: 'GET', headers: { 'User-Agent': 'FlashSmokeDelivery/1.0 (+https://flash-smoke.onrender.com)' }
+      }),
+      nearestLandmark(lat, lng)
+    ]);
+    const j = nomi.json || {};
+    // ใช้ display_name (ครบที่สุดที่ OSM มี) เป็นหลัก ตัด ", ประเทศไทย" ท้ายออก แล้วค่อย fallback เป็นแบบจัดรูปเอง
+    let address = (j.display_name ? j.display_name.replace(/,?\s*ประเทศไทย\s*$/, '').trim() : null) || formatThaiAddress(j.address) || null;
+    if (landmark && (!address || !address.includes(landmark.name))) {
+      const near = `ใกล้ ${landmark.name} ~${landmark.dist} ม.`;
+      address = address ? `${address} (${near})` : near;
+    }
+    send(res, 200, { address, full: j.display_name || null, landmark });
   } catch (e) {
     console.error('[geocode] reverse failed', e.message);
     send(res, 502, { error: 'ค้นหาที่อยู่ไม่สำเร็จ' });
