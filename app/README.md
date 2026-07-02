@@ -135,6 +135,24 @@ https://<โดเมนจริงจาก Render>/api/auth/line/callback
 ```
 แล้วตั้ง env `LINE_LOGIN_REDIRECT` บน Render ให้ตรงกันด้วย
 
+### ขั้นตอนที่ 5 — ส่ง OTP ทางอีเมลจริง (Brevo, ฟรี 300 อีเมล/วัน)
+1. สมัครที่ https://www.brevo.com (ฟรี ไม่ต้องใช้บัตร)
+2. **Settings > Senders, Domains & Dedicated IPs > Senders** -> Add a sender -> ใส่อีเมลของร้าน (เช่น Gmail ของคุณ) แล้วกดยืนยันลิงก์ที่ส่งไปในอีเมลนั้น (ไม่ต้องมีโดเมนของตัวเอง)
+3. **Settings > SMTP & API > API Keys** -> Generate a new API key -> คัดลอกเก็บไว้
+4. ตั้ง env บน Render:
+   | Key | Value |
+   |---|---|
+   | `BREVO_API_KEY` | API key จากข้อ 3 |
+   | `MAIL_FROM` | อีเมล sender ที่ยืนยันแล้วในข้อ 2 |
+   | `MAIL_FROM_NAME` | `FLASH SMOKE` (หรือชื่อร้าน) |
+
+ตอนรัน จะมีบรรทัด `Email OTP: พร้อมส่งจริง (Brevo...)` ยืนยัน — ถ้ายังไม่ตั้ง จะเป็น log-only (โชว์รหัสใน terminal เฉพาะตอน dev)
+
+> ⚠️ **สำคัญ (migration):** ถ้าคุณรัน `schema.sql` เวอร์ชันก่อนหน้าไปแล้ว ตาราง `users` จะยังไม่มีคอลัมน์ `email` — ให้เปิด Supabase SQL Editor แล้วรันบรรทัดนี้ครั้งเดียว:
+> ```sql
+> alter table users add column if not exists email text;
+> ```
+
 ## ตั้งค่าโปรดักชันอื่น ๆ
 ```powershell
 $env:NODE_ENV="production"   # ซ่อนรหัส OTP บนหน้าจอ (ต้องต่อ SMS จริงเอง)
