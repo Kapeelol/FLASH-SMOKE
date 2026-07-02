@@ -1,6 +1,6 @@
 'use strict';
 /*
- * FLASH SMOKE Delivery — backend (v5)
+ * FLASH KRATOM Delivery — backend (v5)
  * ------------------------------------------------------------------
  * Node.js built-in ล้วน (http, https, crypto, fs) — ไม่ต้อง npm install
  *
@@ -57,7 +57,7 @@ const USE_SUPABASE = !!(SUPABASE_URL && SUPABASE_KEY);
 // อีเมล OTP ผ่าน Brevo (Sendinblue) HTTP API — ฟรี 300 อีเมล/วัน, ไม่ต้องมีโดเมน
 const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 const MAIL_FROM = process.env.MAIL_FROM || '';
-const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME || 'FLASH SMOKE';
+const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME || 'FLASH KRATOM';
 const EMAIL_ENABLED = !!(BREVO_API_KEY && MAIL_FROM);
 
 const ORDER_FLOW = ['received', 'preparing', 'delivering', 'completed'];
@@ -396,7 +396,7 @@ function sendOtpEmail(email, code) {
   if (!email) return;
   if (!EMAIL_ENABLED) { console.log('[email] (ยังไม่ตั้งค่า Brevo) OTP สำหรับ ' + email + ' = ' + code); return; }
   const html = `<div style="font-family:'Prompt',Arial,sans-serif;max-width:440px;margin:auto;background:#0d0b15;border-radius:16px;padding:28px;color:#f2eefb">
-    <div style="font-size:22px;font-weight:700;letter-spacing:1px;color:#c4b5fd">FLASH SMOKE</div>
+    <div style="font-size:22px;font-weight:700;letter-spacing:1px;color:#c4b5fd">FLASH KRATOM</div>
     <p style="color:#b6acce;margin:14px 0 6px">รหัสยืนยันการสมัครสมาชิกของคุณคือ</p>
     <div style="font-size:38px;font-weight:800;letter-spacing:10px;color:#fff;margin:8px 0">${code}</div>
     <p style="color:#9a90b0;font-size:13px">รหัสนี้จะหมดอายุใน 5 นาที — หากคุณไม่ได้ทำรายการนี้ กรุณาละเว้นอีเมลฉบับนี้</p>
@@ -404,9 +404,9 @@ function sendOtpEmail(email, code) {
   const body = JSON.stringify({
     sender: { name: MAIL_FROM_NAME, email: MAIL_FROM },
     to: [{ email }],
-    subject: 'รหัสยืนยัน FLASH SMOKE: ' + code,
+    subject: 'รหัสยืนยัน FLASH KRATOM: ' + code,
     htmlContent: html,
-    textContent: 'รหัสยืนยัน FLASH SMOKE ของคุณคือ ' + code + ' (หมดอายุใน 5 นาที)'
+    textContent: 'รหัสยืนยัน FLASH KRATOM ของคุณคือ ' + code + ' (หมดอายุใน 5 นาที)'
   });
   const req = https.request({
     hostname: 'api.brevo.com', path: '/v3/smtp/email', method: 'POST',
@@ -929,7 +929,7 @@ async function main() {
 
   server.listen(PORT, () => {
     console.log('');
-    console.log('  🛵  FLASH SMOKE — สั่งพอตในตัวเมืองชุมพร (v5)');
+    console.log('  🛵  FLASH KRATOM — สั่งพอตในตัวเมืองชุมพร (v5)');
     console.log('  ─────────────────────────────────────────────');
     console.log('  เปิดเว็บที่:  http://localhost:' + PORT);
     console.log('  โหมด:        ' + (DEV ? 'development (โชว์รหัส OTP)' : 'production'));

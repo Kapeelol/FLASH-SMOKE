@@ -1,4 +1,4 @@
--- FLASH SMOKE Delivery — Supabase schema
+-- FLASH KRATOM Delivery — Supabase schema
 -- วิธีใช้: เปิดโปรเจกต์ Supabase ของคุณ -> เมนู "SQL Editor" -> New query -> วางไฟล์นี้ทั้งหมด -> Run
 -- รันได้ปลอดภัยซ้ำได้ (มี IF NOT EXISTS / ON CONFLICT)
 

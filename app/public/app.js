@@ -1,4 +1,4 @@
-/* FLASH SMOKE — สั่งพอตในตัวเมืองชุมพร (frontend v3)
+/* FLASH KRATOM — สั่งพอตในตัวเมืองชุมพร (frontend v3)
  * รูปสินค้า + สต็อกเรียลไทม์ (SSE) + LINE Login + แอดมิน
  */
 (() => {
@@ -494,7 +494,7 @@ function screenWelcome() {
   <div style="position:absolute;inset:0;background:radial-gradient(circle at 50% 22%,#3a2a63 0%,#1a1430 45%,#0b0912 100%);display:flex;flex-direction:column;animation:fs-fade .4s ease">
     <div style="position:absolute;top:-40px;right:-40px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(139,92,246,.35),transparent 70%);animation:fs-glow 4s ease-in-out infinite"></div>
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 34px;text-align:center;position:relative">
-      <img src="${LOGO}" alt="FLASH SMOKE" style="width:270px;max-width:86%;filter:drop-shadow(0 18px 40px rgba(124,58,237,.55));animation:fs-pop .5s ease">
+      <img src="${LOGO}" alt="FLASH KRATOM" style="width:270px;max-width:86%;filter:drop-shadow(0 18px 40px rgba(124,58,237,.55));animation:fs-pop .5s ease">
     </div>
     <div style="padding:0 26px 42px;display:flex;flex-direction:column;gap:11px;position:relative">
       <button data-act="goRegister" style="height:54px;border-radius:16px;background:${BTN};color:#fff;font-size:16px;font-weight:600;box-shadow:0 16px 30px -12px rgba(124,58,237,.9)">สมัครสมาชิก</button>
@@ -574,7 +574,7 @@ function screenOtp() {
   </div>`;
 }
 function screenHome() {
-  const name = (S.user && S.user.fullname) || 'ลูกค้า FLASH SMOKE';
+  const name = (S.user && S.user.fullname) || 'ลูกค้า FLASH KRATOM';
   const avatar = S.user && S.user.avatar
     ? `<img src="${esc(S.user.avatar)}" style="width:42px;height:42px;border-radius:13px;object-fit:cover" alt="">`
     : `<div style="width:42px;height:42px;border-radius:13px;background:rgba(139,92,246,.18);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.8"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"></path></svg></div>`;
@@ -597,7 +597,7 @@ function screenHome() {
   <div style="position:absolute;inset:0;bottom:76px;overflow-y:auto;background:#0d0b15;animation:fs-fade .3s ease">
     <div style="padding:46px 20px 46px;background:linear-gradient(135deg,#3d2b6b,#1c1630);border-radius:0 0 26px 26px">
       <div style="display:flex;align-items:center;justify-content:space-between">
-        <img src="${LOGO}" alt="FLASH SMOKE" style="height:44px;filter:drop-shadow(0 4px 10px rgba(0,0,0,.4))">
+        <img src="${LOGO}" alt="FLASH KRATOM" style="height:44px;filter:drop-shadow(0 4px 10px rgba(0,0,0,.4))">
         <button data-act="logout" style="padding:0 14px;height:34px;border-radius:17px;border:1px solid rgba(255,255,255,.35);color:#fff;font-size:12px;font-weight:600">ออกจากระบบ</button>
       </div>
     </div>
@@ -985,7 +985,7 @@ function screenAdmin() {
   <div style="position:absolute;inset:0;background:#0d0b15;display:flex;flex-direction:column;animation:fs-fade .3s ease">
     <div style="padding:50px 20px 18px;background:linear-gradient(135deg,#3d2b6b,#1c1630)">
       <div style="display:flex;align-items:center;justify-content:space-between">
-        <div><div style="color:#fff;font-size:19px;font-weight:700">แผงผู้ดูแลระบบ</div><div style="color:#c4b5fd;font-size:12px;margin-top:2px">FLASH SMOKE · ${esc((S.user && S.user.fullname) || '')}</div></div>
+        <div><div style="color:#fff;font-size:19px;font-weight:700">แผงผู้ดูแลระบบ</div><div style="color:#c4b5fd;font-size:12px;margin-top:2px">FLASH KRATOM · ${esc((S.user && S.user.fullname) || '')}</div></div>
         <button data-act="logout" style="padding:0 14px;height:34px;border-radius:17px;border:1px solid rgba(255,255,255,.35);color:#fff;font-size:12px;font-weight:600">ออก</button>
       </div>
       <div style="display:flex;gap:7px;margin-top:16px">${tabBtn('orders', 'ออเดอร์')}${tabBtn('products', 'สินค้า')}${tabBtn('sales', 'ยอดขาย')}</div>
@@ -1141,7 +1141,7 @@ function isMobileDevice() {
 function showDesktopBlock() {
   const d = document.createElement('div');
   d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0910;background-image:radial-gradient(circle at 30% 15%,#1a1526,#08070d);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:32px;color:#f2eefb;font-family:\'Prompt\',sans-serif';
-  d.innerHTML = `<img src="assets/logo.png" alt="FLASH SMOKE" style="width:230px;max-width:72%;filter:drop-shadow(0 18px 40px rgba(124,58,237,.5))">
+  d.innerHTML = `<img src="assets/logo.png" alt="FLASH KRATOM" style="width:230px;max-width:72%;filter:drop-shadow(0 18px 40px rgba(124,58,237,.5))">
     <div style="font-size:21px;font-weight:700;margin-top:26px">เว็บนี้ใช้งานผ่านมือถือเท่านั้น 📱</div>
     <div style="font-size:14px;color:#9a90b0;margin-top:10px;line-height:1.6;max-width:340px">กรุณาเปิดลิงก์นี้บนสมาร์ทโฟน<br>เพื่อสั่งพอตในตัวเมืองชุมพร</div>
     <button id="fs-desktop-continue" style="margin-top:30px;color:#6a6280;font-size:12.5px;text-decoration:underline;text-underline-offset:3px;background:none;border:none;cursor:pointer;font-family:inherit">เข้าใช้งานบนคอมพิวเตอร์ต่อไป</button>`;
