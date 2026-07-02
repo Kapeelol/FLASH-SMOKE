@@ -10,6 +10,12 @@ const PAY_LABEL = { cod: 'เก็บเงินปลายทาง', transf
 const BTN = 'linear-gradient(135deg,#a78bfa,#7c3aed)';
 const BTN_OFF = '#2a2440';
 const TAGLINE = 'สั่งพอตในตัวเมืองชุมพร';
+const CHUMPHON_CENTER = { lat: 10.4930, lng: 99.1800 };
+const TILE_STYLES = {
+  violet: { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attribution: '&copy; OpenStreetMap &copy; CARTO' },
+  mono: { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', attribution: '&copy; OpenStreetMap &copy; CARTO' },
+  night: { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', attribution: '&copy; OpenStreetMap &copy; CARTO' }
+};
 
 // ---------------- API ----------------
 const API = {
@@ -34,7 +40,7 @@ const S = {
   fullname: '', phone: '', email: '', password: '',
   loginPhone: '', loginPassword: '',
   otp: ['', '', '', ''], devCode: '', otpEmail: '',
-  pinX: 50, pinY: 46, dragging: false,
+  pinLat: null, pinLng: null, currentAddr: '', addrLoading: false, wantsGeoLocate: false,
   addrDetail: '', addrLabel: 'บ้าน', mapStyle: 'violet', fromCheckout: false,
   saved: [], products: [], orders: [],
   settings: { deliveryFee: 20, freeQty: 2 },
@@ -47,6 +53,10 @@ const S = {
   toast: '', busy: false
 };
 let pendingLineError = '';
+// สถานะแผนที่จริง (Leaflet) — คงอยู่นอก S เพราะเป็น DOM/instance ไม่ใช่ข้อมูลแอป
+let leafletMap = null, leafletMarker = null, leafletTile = null;
+let adminMiniMapInst = null;
+let geocodeTimer = null, geocodeReqId = 0;
 
 // ---------------- Helpers ----------------
 const $ = (s, r = document) => r.querySelector(s);
@@ -98,14 +108,92 @@ function productMedia(p, h) {
     ? `<div style="height:${h}px;border-radius:12px;overflow:hidden;background:#0f0c18"><img src="${esc(p.image)}" style="width:100%;height:100%;object-fit:cover" alt=""></div>`
     : `<div style="height:${h}px;border-radius:12px;background:rgba(139,92,246,.1);display:flex;align-items:center;justify-content:center;font-size:38px">${esc(p.emoji || '🛍️')}</div>`;
 }
-function addrFromPin(x, y) {
-  const streets = ['กรมหลวงชุมพร', 'ท่าตะเภา', 'ปรมินทรมรรคา', 'พิศิษฐ์พยาบาล', 'ศาลาแดง', 'นวมินทร์รวมใจ', 'ประชาอุทิศ', 'ทวีสินค้า'];
-  const tambon = ['ท่าตะเภา', 'นาทุ่ง', 'บางหมาก', 'ตากแดด', 'วังไผ่', 'บ้านนา'];
-  const si = Math.min(streets.length - 1, Math.max(0, Math.floor(y / 100 * streets.length)));
-  const ti = Math.min(tambon.length - 1, Math.max(0, Math.floor(x / 100 * tambon.length)));
-  const no = Math.round(x * 1.8) + '/' + Math.max(1, Math.round(y / 9));
-  const soi = Math.max(1, Math.round(x / 100 * 22));
-  return no + ' ถ.' + streets[si] + ' ซ.' + soi + ' ต.' + tambon[ti] + ' อ.เมืองชุมพร จ.ชุมพร 86000';
+// ---------------- แผนที่จริง (Leaflet + OpenStreetMap/CARTO, ฟรี ไม่ต้องใช้ API key) ----------------
+function purpleDivIcon() {
+  return L.divIcon({
+    className: 'fs-leaflet-pin',
+    html: '<svg width="38" height="46" viewBox="0 0 24 30" fill="none"><path d="M12 0C6 0 1.5 4.5 1.5 10.5C1.5 18 12 30 12 30S22.5 18 22.5 10.5C22.5 4.5 18 0 12 0Z" fill="#8b5cf6" stroke="#fff" stroke-width="1.4"></path><circle cx="12" cy="10.5" r="4" fill="#fff"></circle></svg>',
+    iconSize: [38, 46], iconAnchor: [19, 46]
+  });
+}
+function switchTileLayer() {
+  if (!leafletMap) return;
+  if (leafletTile) leafletMap.removeLayer(leafletTile);
+  const style = TILE_STYLES[S.mapStyle] || TILE_STYLES.violet;
+  leafletTile = L.tileLayer(style.url, { subdomains: 'abcd', maxZoom: 19, detectRetina: true, attribution: style.attribution }).addTo(leafletMap);
+}
+function updateStyleButtons(root) {
+  const map = { violet: 'styleViolet', mono: 'styleMono', night: 'styleNight' };
+  for (const s in map) { const btn = root.querySelector(`[data-act="${map[s]}"]`); if (btn) btn.style.borderColor = S.mapStyle === s ? '#fff' : 'rgba(255,255,255,.35)'; }
+}
+function updateLabelButtons(root) {
+  const lbl = (a) => a ? { bg: 'rgba(139,92,246,.22)', fg: '#c4b5fd', bd: 'rgba(139,92,246,.55)' } : { bg: '#0f0c18', fg: '#9a90b0', bd: 'rgba(255,255,255,.08)' };
+  const map = { labelHome: 'บ้าน', labelWork: 'ที่ทำงาน', labelOther: 'อื่นๆ' };
+  for (const act in map) {
+    const btn = root.querySelector(`[data-act="${act}"]`);
+    if (!btn) continue;
+    const s = lbl(S.addrLabel === map[act]);
+    btn.style.background = s.bg; btn.style.color = s.fg; btn.style.borderColor = s.bd;
+  }
+}
+function patchAddrText(text) { const el = document.querySelector('.map-addr'); if (el) el.textContent = text; }
+function scheduleReverseGeocode(lat, lng) {
+  S.addrLoading = true;
+  patchAddrText('กำลังค้นหาที่อยู่...');
+  clearTimeout(geocodeTimer);
+  const myReq = ++geocodeReqId;
+  geocodeTimer = setTimeout(async () => {
+    let addr;
+    try { const r = await API.get('/api/geocode/reverse?lat=' + lat + '&lng=' + lng); addr = r.address; } catch {}
+    if (myReq !== geocodeReqId) return;
+    S.currentAddr = addr || (lat.toFixed(5) + ', ' + lng.toFixed(5));
+    S.addrLoading = false;
+    patchAddrText(S.currentAddr);
+  }, 600);
+}
+function setPin(lat, lng, fly) {
+  S.pinLat = lat; S.pinLng = lng;
+  if (fly && leafletMap) leafletMap.flyTo([lat, lng], Math.max(leafletMap.getZoom(), 16));
+  scheduleReverseGeocode(lat, lng);
+}
+function locateAndCenter(showToast) {
+  if (!navigator.geolocation) { toast('เบราว์เซอร์นี้ไม่รองรับ GPS'); return; }
+  if (showToast) toast('กำลังค้นหาตำแหน่ง GPS...');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const { latitude, longitude } = pos.coords;
+      if (leafletMarker) leafletMarker.setLatLng([latitude, longitude]);
+      setPin(latitude, longitude, true);
+      if (showToast) toast('ปักหมุดที่ตำแหน่งของคุณแล้ว');
+    },
+    () => toast('ไม่สามารถเข้าถึงตำแหน่งได้ กรุณาอนุญาตการเข้าถึงตำแหน่ง'),
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+  );
+}
+function initLeafletMap(root) {
+  const container = root.querySelector('#leaflet-map');
+  if (!container || typeof L === 'undefined') return;
+  const startLat = S.pinLat != null ? S.pinLat : CHUMPHON_CENTER.lat;
+  const startLng = S.pinLng != null ? S.pinLng : CHUMPHON_CENTER.lng;
+  leafletMap = L.map(container, { zoomControl: false, attributionControl: true }).setView([startLat, startLng], S.pinLat != null ? 16 : 14);
+  switchTileLayer();
+  leafletMarker = L.marker([startLat, startLng], { draggable: true, icon: purpleDivIcon() }).addTo(leafletMap);
+  leafletMarker.on('dragend', () => { const ll = leafletMarker.getLatLng(); setPin(ll.lat, ll.lng, false); });
+  leafletMap.on('click', (e) => { leafletMarker.setLatLng(e.latlng); setPin(e.latlng.lat, e.latlng.lng, false); });
+  // แก้บั๊กที่ Leaflet คำนวณขนาด container ผิดตอนสร้างครั้งแรก (มักเกิดเพราะ container ยังไม่มีขนาดจริงตอนนั้น) — วัดใหม่แล้วปักกึ่งกลางซ้ำ
+  setTimeout(() => { if (leafletMap) { leafletMap.invalidateSize(); leafletMap.setView([startLat, startLng], leafletMap.getZoom()); } }, 0);
+  updateStyleButtons(root);
+  if (S.wantsGeoLocate) { S.wantsGeoLocate = false; locateAndCenter(true); }
+  else { S.pinLat = startLat; S.pinLng = startLng; scheduleReverseGeocode(startLat, startLng); }
+}
+function renderAdminMiniMap(root, lat, lng) {
+  const container = root.querySelector('#admin-mini-map');
+  if (!container || typeof L === 'undefined' || lat == null || lng == null) return;
+  if (adminMiniMapInst) { adminMiniMapInst.remove(); adminMiniMapInst = null; }
+  adminMiniMapInst = L.map(container, { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false, attributionControl: false }).setView([lat, lng], 16);
+  L.tileLayer(TILE_STYLES.violet.url, { subdomains: 'abcd', maxZoom: 19, detectRetina: true }).addTo(adminMiniMapInst);
+  L.marker([lat, lng], { icon: purpleDivIcon() }).addTo(adminMiniMapInst);
+  setTimeout(() => { if (adminMiniMapInst) { adminMiniMapInst.invalidateSize(); adminMiniMapInst.setView([lat, lng], 16); } }, 0);
 }
 function phoneMask(phone) {
   const p = phone.replace(/\D/g, '');
@@ -233,10 +321,13 @@ async function afterLogin() {
 }
 function lineLogin() { window.location.href = '/api/auth/line/login'; }
 async function saveAddress() {
-  if (S.busy) return; S.busy = true;
-  const text = addrFromPin(S.pinX, S.pinY) + (S.addrDetail.trim() ? (' (' + S.addrDetail.trim() + ')') : '');
+  if (S.busy) return;
+  if (S.pinLat == null || S.pinLng == null) return toast('กรุณาปักหมุดตำแหน่งก่อน');
+  S.busy = true;
+  const base = S.currentAddr || (S.pinLat.toFixed(5) + ', ' + S.pinLng.toFixed(5));
+  const text = base + (S.addrDetail.trim() ? (' (' + S.addrDetail.trim() + ')') : '');
   try {
-    const r = await API.post('/api/addresses', { label: S.addrLabel, kind: kindFromLabel(S.addrLabel), text, detail: S.addrDetail.trim(), lat: S.pinY, lng: S.pinX });
+    const r = await API.post('/api/addresses', { label: S.addrLabel, kind: kindFromLabel(S.addrLabel), text, detail: S.addrDetail.trim(), lat: S.pinLat, lng: S.pinLng });
     S.addrDetail = ''; await loadUserData();
     if (S.fromCheckout) { S.fromCheckout = false; S.checkoutAddressId = r.address.id; S.screen = 'checkout'; } else S.screen = 'saved';
     render(); toast('บันทึกที่อยู่แล้ว ✓');
@@ -433,46 +524,28 @@ function screenMethod() {
   </div>`;
 }
 function screenMap() {
-  const filters = { violet: 'none', mono: 'grayscale(1) brightness(1.15)', night: 'brightness(.72) saturate(1.5) hue-rotate(-15deg)' };
-  const vizStyle = `position:absolute;inset:0;filter:${filters[S.mapStyle]};transition:filter .3s ease`;
   const bd = (s) => S.mapStyle === s ? '#fff' : 'rgba(255,255,255,.35)';
   const lbl = (a) => a ? { bg: 'rgba(139,92,246,.22)', fg: '#c4b5fd', bd: 'rgba(139,92,246,.55)' } : { bg: '#0f0c18', fg: '#9a90b0', bd: 'rgba(255,255,255,.08)' };
   const lh = lbl(S.addrLabel === 'บ้าน'), lw = lbl(S.addrLabel === 'ที่ทำงาน'), lo = lbl(S.addrLabel === 'อื่นๆ');
-  const pinStyle = `position:absolute;left:${S.pinX}%;top:${S.pinY}%;transform:translate(-50%,-100%);transition:${S.dragging ? 'none' : 'left .45s cubic-bezier(.2,.8,.2,1),top .45s cubic-bezier(.2,.8,.2,1)'};z-index:20;pointer-events:none;filter:drop-shadow(0 6px 6px rgba(0,0,0,.5))`;
-  const pulseStyle = `position:absolute;left:${S.pinX}%;top:${S.pinY}%;width:26px;height:26px;border-radius:50%;background:rgba(139,92,246,.5);transform:translate(-50%,-50%);pointer-events:none;z-index:19;animation:fs-pulse 2s ease-out infinite`;
+  const addrText = S.addrLoading ? 'กำลังค้นหาที่อยู่...' : (S.currentAddr || 'แตะบนแผนที่เพื่อปักหมุด');
   return `
   <div style="position:absolute;inset:0;bottom:76px;background:#0d0b15;display:flex;flex-direction:column;animation:fs-fade .3s ease">
     ${topbar('ปักหมุดตำแหน่ง', 'goMethod')}
-    <div id="map" style="position:relative;flex:1;overflow:hidden;background:#14101f;cursor:grab;touch-action:none">
-      <div style="${vizStyle}">
-        <div style="position:absolute;left:0;top:22%;width:100%;height:16px;background:#2a2440"></div>
-        <div style="position:absolute;left:0;top:64%;width:100%;height:22px;background:#2f2848"></div>
-        <div style="position:absolute;left:18%;top:0;width:14px;height:100%;background:#2a2440"></div>
-        <div style="position:absolute;left:70%;top:0;width:18px;height:100%;background:#2f2848"></div>
-        <div style="position:absolute;left:-10%;top:38%;width:130%;height:30px;background:#3a2f5c;transform:rotate(-18deg)"></div>
-        <div style="position:absolute;left:2%;top:4%;width:22%;height:26%;border-radius:6px;background:#1f1a30"></div>
-        <div style="position:absolute;left:32%;top:2%;width:30%;height:30%;border-radius:6px;background:#221c34"></div>
-        <div style="position:absolute;left:26%;top:30%;width:38%;height:26%;border-radius:8px;background:linear-gradient(135deg,#1f3326,#25402e)"></div>
-        <div style="position:absolute;left:74%;top:10%;width:24%;height:40%;border-radius:6px;background:#1f1a30"></div>
-        <div style="position:absolute;left:2%;top:72%;width:28%;height:24%;border-radius:6px;background:#221c34"></div>
-        <div style="position:absolute;left:76%;top:70%;width:22%;height:26%;border-radius:6px;background:#1f1a30"></div>
-        <div style="position:absolute;left:-5%;top:82%;width:120%;height:60px;background:linear-gradient(180deg,#16283a,#122031);transform:rotate(6deg)"></div>
-      </div>
-      <div style="position:absolute;top:12px;right:12px;display:flex;flex-direction:column;gap:8px;z-index:15">
+    <div style="position:relative;flex:1;overflow:hidden;background:#14101f">
+      <div id="leaflet-map" style="position:absolute;inset:0"></div>
+      <div style="position:absolute;top:12px;right:12px;display:flex;flex-direction:column;gap:8px;z-index:1000">
         <button data-act="styleViolet" style="width:38px;height:38px;border-radius:11px;border:2px solid ${bd('violet')};background:linear-gradient(135deg,#3a2f5c,#7c3aed);box-shadow:0 4px 10px rgba(0,0,0,.4)"></button>
         <button data-act="styleMono" style="width:38px;height:38px;border-radius:11px;border:2px solid ${bd('mono')};background:linear-gradient(135deg,#3a3a3a,#8a8a8a);box-shadow:0 4px 10px rgba(0,0,0,.4)"></button>
         <button data-act="styleNight" style="width:38px;height:38px;border-radius:11px;border:2px solid ${bd('night')};background:linear-gradient(135deg,#0b1024,#20306b);box-shadow:0 4px 10px rgba(0,0,0,.4)"></button>
       </div>
-      <button data-act="useCurrent" style="position:absolute;right:14px;bottom:16px;width:48px;height:48px;border-radius:14px;background:#1a1626;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 20px rgba(0,0,0,.5);z-index:15"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg></button>
-      <div style="position:absolute;left:14px;bottom:16px;background:rgba(13,11,21,.82);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.1);border-radius:11px;padding:8px 12px;font-size:11.5px;color:#c4b5fd;font-weight:500;z-index:15">ลากแผนที่เพื่อเลื่อนหมุด</div>
-      <div style="${pinStyle}"><svg width="42" height="52" viewBox="0 0 24 30" fill="none"><path d="M12 0C6 0 1.5 4.5 1.5 10.5C1.5 18 12 30 12 30S22.5 18 22.5 10.5C22.5 4.5 18 0 12 0Z" fill="#8b5cf6" stroke="#fff" stroke-width="1.4"></path><circle cx="12" cy="10.5" r="4" fill="#fff"></circle></svg></div>
-      <div style="${pulseStyle}"></div>
+      <button data-act="useCurrent" style="position:absolute;right:14px;bottom:16px;width:48px;height:48px;border-radius:14px;background:#1a1626;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 20px rgba(0,0,0,.5);z-index:1000"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg></button>
+      <div style="position:absolute;left:14px;bottom:16px;background:rgba(13,11,21,.82);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.1);border-radius:11px;padding:8px 12px;font-size:11.5px;color:#c4b5fd;font-weight:500;z-index:1000;pointer-events:none">แตะหรือลากหมุดเพื่อเลือกตำแหน่ง</div>
     </div>
     <div style="background:#161221;border-radius:22px 22px 0 0;border-top:1px solid rgba(255,255,255,.08);padding:14px 20px 18px;box-shadow:0 -12px 30px rgba(0,0,0,.4);z-index:20">
       <div style="width:40px;height:4px;border-radius:2px;background:#39304d;margin:0 auto 14px"></div>
       <div style="display:flex;align-items:flex-start;gap:11px">
         <div style="width:36px;height:36px;border-radius:11px;background:rgba(139,92,246,.18);display:flex;align-items:center;justify-content:center;flex:none;margin-top:2px">${IC.pin('#a78bfa', 19)}</div>
-        <div style="flex:1;line-height:1.4"><div style="font-size:12px;color:#9a90b0">ตำแหน่งที่เลือก</div><div class="map-addr" style="font-size:14px;font-weight:500;color:#f2eefb">${esc(addrFromPin(S.pinX, S.pinY))}</div></div>
+        <div style="flex:1;line-height:1.4"><div style="font-size:12px;color:#9a90b0">ตำแหน่งที่เลือก</div><div class="map-addr" style="font-size:14px;font-weight:500;color:#f2eefb">${esc(addrText)}</div></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:14px">
         <button data-act="labelHome" style="flex:1;height:38px;border-radius:11px;font-size:13px;font-weight:500;background:${lh.bg};color:${lh.fg};border:1px solid ${lh.bd}">🏠 บ้าน</button>
@@ -619,26 +692,6 @@ function screenOrders() {
     <div style="flex:1;overflow-y:auto;padding:18px">${rows}</div>
   </div>`;
 }
-// แผนที่จำลอง + หมุด (ใช้แสดงตำแหน่งที่ลูกค้าปักมา) — lng=pinX%, lat=pinY%
-function miniMap(lng, lat) {
-  const x = (lng == null ? 50 : lng), y = (lat == null ? 46 : lat);
-  return `<div style="position:relative;height:170px;border-radius:14px;overflow:hidden;background:#14101f;border:1px solid rgba(255,255,255,.08)">
-    <div style="position:absolute;inset:0">
-      <div style="position:absolute;left:0;top:22%;width:100%;height:14px;background:#2a2440"></div>
-      <div style="position:absolute;left:0;top:64%;width:100%;height:18px;background:#2f2848"></div>
-      <div style="position:absolute;left:18%;top:0;width:12px;height:100%;background:#2a2440"></div>
-      <div style="position:absolute;left:70%;top:0;width:16px;height:100%;background:#2f2848"></div>
-      <div style="position:absolute;left:-10%;top:38%;width:130%;height:26px;background:#3a2f5c;transform:rotate(-18deg)"></div>
-      <div style="position:absolute;left:26%;top:30%;width:38%;height:26%;border-radius:8px;background:linear-gradient(135deg,#1f3326,#25402e)"></div>
-      <div style="position:absolute;left:2%;top:4%;width:22%;height:26%;border-radius:6px;background:#1f1a30"></div>
-      <div style="position:absolute;left:74%;top:10%;width:24%;height:40%;border-radius:6px;background:#1f1a30"></div>
-      <div style="position:absolute;left:-5%;top:82%;width:120%;height:50px;background:linear-gradient(180deg,#16283a,#122031);transform:rotate(6deg)"></div>
-    </div>
-    <div style="position:absolute;left:${x}%;top:${y}%;width:24px;height:24px;border-radius:50%;background:rgba(139,92,246,.5);transform:translate(-50%,-50%);animation:fs-pulse 2s ease-out infinite"></div>
-    <div style="position:absolute;left:${x}%;top:${y}%;transform:translate(-50%,-100%);filter:drop-shadow(0 6px 6px rgba(0,0,0,.5))"><svg width="34" height="42" viewBox="0 0 24 30" fill="none"><path d="M12 0C6 0 1.5 4.5 1.5 10.5C1.5 18 12 30 12 30S22.5 18 22.5 10.5C22.5 4.5 18 0 12 0Z" fill="#8b5cf6" stroke="#fff" stroke-width="1.4"></path><circle cx="12" cy="10.5" r="4" fill="#fff"></circle></svg></div>
-    <div style="position:absolute;left:10px;bottom:10px;background:rgba(13,11,21,.85);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:6px 10px;font-size:11px;color:#c4b5fd;font-weight:500">📍 ตำแหน่งที่ลูกค้าปักหมุด</div>
-  </div>`;
-}
 function screenAdminOrder() {
   const o = S.adminOrders.find((x) => x.id === S.adminOrderId);
   if (!o) { S.adminOrderId = null; return screenAdmin(); }
@@ -658,9 +711,11 @@ function screenAdminOrder() {
         <div style="font-size:12px;color:#c4b5fd;font-weight:600;margin-top:8px">สถานะปัจจุบัน: ${STATUS_LABEL[o.status]}</div>
       </div>
       <div style="font-size:13px;font-weight:600;color:#f2eefb;margin-bottom:8px">ตำแหน่งจัดส่ง</div>
-      ${miniMap(o.addrLng, o.addrLat)}
+      ${o.addrLat != null && o.addrLng != null
+        ? `<div style="position:relative;height:170px;border-radius:14px;overflow:hidden;background:#14101f;border:1px solid rgba(255,255,255,.08)"><div id="admin-mini-map" style="position:absolute;inset:0"></div><div style="position:absolute;left:10px;bottom:10px;background:rgba(13,11,21,.85);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:6px 10px;font-size:11px;color:#c4b5fd;font-weight:500;z-index:1000;pointer-events:none">📍 ตำแหน่งที่ลูกค้าปักหมุด</div></div>`
+        : `<div style="height:90px;border-radius:14px;background:#14101f;border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;color:#6a6280;font-size:12.5px">ไม่มีข้อมูลพิกัด</div>`}
       <div style="font-size:12.5px;color:#9a90b0;margin-top:8px;line-height:1.5">${esc(o.addressText || '-')}</div>
-      ${o.addrLat != null ? `<div style="font-size:11px;color:#6a6280;margin-top:3px">พิกัดหมุด: ${Number(o.addrLng).toFixed(1)}, ${Number(o.addrLat).toFixed(1)}</div>` : ''}
+      ${o.addrLat != null ? `<div style="font-size:11px;color:#6a6280;margin-top:3px">พิกัดหมุด: ${Number(o.addrLat).toFixed(5)}, ${Number(o.addrLng).toFixed(5)}</div>` : ''}
       <div style="background:#15111f;border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px;margin-top:14px">
         <div style="font-size:13px;font-weight:600;color:#f2eefb;margin-bottom:10px">รายการสินค้า</div>${items}
         <div style="display:flex;justify-content:space-between;font-size:12px;color:#9a90b0;margin-top:6px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06)"><span>ค่าจัดส่ง</span><span>${o.deliveryFee ? '฿' + o.deliveryFee : 'ฟรี'}</span></div>
@@ -842,10 +897,12 @@ const ACT = {
   addCart: (el) => { if (addToCart(el.dataset.id)) { const p = productById(el.dataset.id); render(); toast('เพิ่ม ' + (p ? p.name : 'สินค้า') + ' ลงตะกร้าแล้ว ✓'); } },
   incQty: (el) => { setQty(el.dataset.id, 1); render(); },
   decQty: (el) => { setQty(el.dataset.id, -1); render(); },
-  useCurrent: () => { S.pinX = 50; S.pinY = 46; render(); toast('ปักหมุดที่ตำแหน่งของคุณแล้ว'); },
-  useCurrentThenMap: () => { S.pinX = 50; S.pinY = 46; S.screen = 'map'; render(); toast('กำลังค้นหาตำแหน่ง GPS...'); },
-  styleViolet: () => { S.mapStyle = 'violet'; render(); }, styleMono: () => { S.mapStyle = 'mono'; render(); }, styleNight: () => { S.mapStyle = 'night'; render(); },
-  labelHome: () => { S.addrLabel = 'บ้าน'; render(); }, labelWork: () => { S.addrLabel = 'ที่ทำงาน'; render(); }, labelOther: () => { S.addrLabel = 'อื่นๆ'; render(); },
+  useCurrent: () => locateAndCenter(true),
+  useCurrentThenMap: () => { S.wantsGeoLocate = true; S.screen = 'map'; render(); },
+  styleViolet: () => { S.mapStyle = 'violet'; switchTileLayer(); updateStyleButtons($('#screen')); },
+  styleMono: () => { S.mapStyle = 'mono'; switchTileLayer(); updateStyleButtons($('#screen')); },
+  styleNight: () => { S.mapStyle = 'night'; switchTileLayer(); updateStyleButtons($('#screen')); },
+  labelHome: () => { S.addrLabel = 'บ้าน'; updateLabelButtons($('#screen')); }, labelWork: () => { S.addrLabel = 'ที่ทำงาน'; updateLabelButtons($('#screen')); }, labelOther: () => { S.addrLabel = 'อื่นๆ'; updateLabelButtons($('#screen')); },
   selectAddr: (el) => { if (S.fromCheckout) { S.fromCheckout = false; S.checkoutAddressId = el.dataset.id; go('checkout'); } else toast('เลือก ' + (el.dataset.label || 'ที่อยู่') + ' เป็นที่จัดส่ง ✓'); },
   deleteAddr: (el) => deleteAddress(el.dataset.id),
   pickAddr: (el) => { S.checkoutAddressId = el.dataset.id; render(); },
@@ -862,6 +919,9 @@ const ACT = {
 // Render + wiring
 // ================================================================
 function render() {
+  // ทำลาย instance แผนที่จริงเมื่อออกจากหน้าที่ใช้มัน (กัน leak + ไม่ให้ค้างอ้างอิง DOM ที่ถูกแทนที่)
+  if (leafletMap && S.screen !== 'map') { leafletMap.remove(); leafletMap = null; leafletMarker = null; leafletTile = null; clearTimeout(geocodeTimer); }
+  if (adminMiniMapInst && !(S.screen === 'admin' && S.adminOrderId)) { adminMiniMapInst.remove(); adminMiniMapInst = null; }
   const screens = { welcome: screenWelcome, register: screenRegister, login: screenLogin, otp: screenOtp, home: screenHome, method: screenMethod, map: screenMap, saved: screenSaved, profile: screenProfile, cart: screenCart, checkout: screenCheckout, orders: screenOrders, admin: screenAdmin };
   if (S.screen === 'checkout' && !S.checkoutAddressId && S.saved.length) S.checkoutAddressId = S.saved[0].id;
   $('#screen').innerHTML = (screens[S.screen] || screenWelcome)();
@@ -893,23 +953,18 @@ function wire() {
       reader.readAsDataURL(f);
     };
   });
-  const map = root.querySelector('#map');
-  if (map) {
-    const moveTo = (e) => {
-      const rect = map.getBoundingClientRect();
-      const x = Math.min(96, Math.max(4, ((e.clientX - rect.left) / rect.width) * 100));
-      const y = Math.min(90, Math.max(8, ((e.clientY - rect.top) / rect.height) * 100));
-      S.pinX = x; S.pinY = y;
-      const pin = map.querySelector('div[style*="translate(-50%,-100%)"]'), pulse = map.querySelector('div[style*="fs-pulse"]');
-      if (pin) { pin.style.left = x + '%'; pin.style.top = y + '%'; pin.style.transition = 'none'; }
-      if (pulse) { pulse.style.left = x + '%'; pulse.style.top = y + '%'; }
-      const a = root.querySelector('.map-addr'); if (a) a.textContent = addrFromPin(x, y);
-    };
-    map.onpointerdown = (e) => { S.dragging = true; try { map.setPointerCapture(e.pointerId); } catch {} moveTo(e); };
-    map.onpointermove = (e) => { if (S.dragging) moveTo(e); };
-    map.onpointerup = () => { S.dragging = false; render(); };
+  if (root.querySelector('#leaflet-map')) initLeafletMap(root);
+  if (root.querySelector('#admin-mini-map') && S.adminOrderId) {
+    const ord = S.adminOrders.find((x) => x.id === S.adminOrderId);
+    if (ord) renderAdminMiniMap(root, ord.addrLat, ord.addrLng);
   }
 }
+
+// รักษาขนาด/จุดกึ่งกลางแผนที่ให้ถูกต้องเมื่อหน้าจอเปลี่ยนขนาด (หมุนจอ, ปรับขนาดหน้าต่าง)
+window.addEventListener('resize', () => {
+  if (leafletMap) { leafletMap.invalidateSize(); if (S.pinLat != null && S.pinLng != null) leafletMap.setView([S.pinLat, S.pinLng], leafletMap.getZoom()); }
+  if (adminMiniMapInst) adminMiniMapInst.invalidateSize();
+});
 
 // ---------------- Live stock (SSE) ----------------
 function connectStream() {

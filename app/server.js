@@ -612,6 +612,25 @@ route('POST', '/api/me/update', async (req, res, body) => {
   send(res, 200, { ok: true, user: publicUser(updated) });
 });
 
+// ---- Geocoding (OpenStreetMap Nominatim — ฟรี ไม่ต้องมี API key) ----
+route('GET', '/api/geocode/reverse', async (req, res) => {
+  const q = query(req);
+  const lat = Number(q.get('lat')), lng = Number(q.get('lng'));
+  if (!isFinite(lat) || !isFinite(lng)) return send(res, 400, { error: 'พิกัดไม่ถูกต้อง' });
+  try {
+    const r = await httpsJson({
+      hostname: 'nominatim.openstreetmap.org',
+      path: `/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=th&zoom=18&addressdetails=1`,
+      method: 'GET',
+      headers: { 'User-Agent': 'FlashSmokeDelivery/1.0 (+https://flash-smoke.onrender.com)' }
+    });
+    send(res, 200, { address: (r.json && r.json.display_name) || null });
+  } catch (e) {
+    console.error('[geocode] reverse failed', e.message);
+    send(res, 502, { error: 'ค้นหาที่อยู่ไม่สำเร็จ' });
+  }
+});
+
 // ---- Addresses ----
 route('GET', '/api/addresses', async (req, res) => {
   const u = await getAuthUser(req); if (!u) return send(res, 401, { error: 'unauthorized' });

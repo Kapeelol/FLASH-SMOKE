@@ -19,3 +19,9 @@ button{font-family:'Prompt',sans-serif;cursor:pointer;border:none;background:non
 }
 
 input:focus{border-color:rgba(167,139,250,.6)!important}
+
+/* แผนที่จริง (Leaflet) — ปรับให้เข้ากับธีมมืดของแอป */
+.leaflet-container{background:#14101f;font-family:'Prompt',sans-serif}
+.fs-leaflet-pin{background:transparent!important;border:none!important}
+.leaflet-control-attribution{background:rgba(13,11,21,.75)!important;color:#9a90b0!important;font-size:9.5px!important}
+.leaflet-control-attribution a{color:#c4b5fd!important}
