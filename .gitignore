@@ -1,0 +1,19 @@
+# เครื่องมือ/เซสชันส่วนตัว — ไม่ใช่ส่วนหนึ่งของแอป
+.claude/
+
+# ฐานข้อมูลไฟล์ท้องถิ่น (ใช้เฉพาะตอน dev ไม่ตั้ง Supabase) — สร้างใหม่อัตโนมัติตอนรัน
+app/db.json
+
+# รูปที่อัปโหลดตอน dev ท้องถิ่น (โปรดักชันเก็บบน Supabase Storage แทน)
+app/public/uploads/*
+!app/public/uploads/.gitkeep
+
+# ความลับ — ห้าม commit เด็ดขาด
+.env
+.env.local
+*.env
+
+# ทั่วไป
+node_modules/
+.DS_Store
+Thumbs.db
