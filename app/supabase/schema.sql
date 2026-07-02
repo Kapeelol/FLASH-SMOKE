@@ -78,9 +78,12 @@ create table if not exists settings (
   delivery_fee  int not null default 20,
   free_qty      int not null default 2,
   ad_image      text default 'assets/banner.jpg',
-  ad_enabled    boolean not null default true
+  ad_enabled    boolean not null default true,
+  banners       jsonb not null default '["assets/banner.jpg"]'
 );
 insert into settings (id) values (1) on conflict (id) do nothing;
+-- migration: เผื่อ table settings ถูกสร้างไว้ก่อนเพิ่มฟีเจอร์แบนเนอร์สไลด์
+alter table settings add column if not exists banners jsonb not null default '["assets/banner.jpg"]';
 
 -- ปิดการเข้าถึงตรงจากภายนอก (frontend ไม่คุยกับ Supabase โดยตรง — backend เท่านั้นที่ใช้ service_role key
 -- ซึ่ง bypass RLS อยู่แล้ว; การเปิด RLS ไว้แบบไม่มี policy คือการป้องกันชั้นที่สองเผื่อ anon key หลุด)

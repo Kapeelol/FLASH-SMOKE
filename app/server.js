@@ -126,7 +126,7 @@ function seedProducts() {
     { id: 'p4', name: 'CLASSIC SODA', desc: 'โซดาต้นตำรับ', price: 45, emoji: '🥤', tag: '', image: null, stock: 20 }
   ];
 }
-const defaultSettings = () => ({ deliveryFee: 20, freeQty: 2, adImage: 'assets/banner.jpg', adEnabled: true });
+const defaultSettings = () => ({ deliveryFee: 20, freeQty: 2, adImage: 'assets/banner.jpg', adEnabled: true, banners: ['assets/banner.jpg'] });
 
 // ==================================================================
 // Store — persistence layer. Two backends, same async interface.
@@ -239,7 +239,7 @@ function makeSupabaseStore() {
   const prodIn = (p) => ({ id: p.id, name: p.name, description: p.desc || '', price: p.price, emoji: p.emoji, tag: p.tag || '', image: p.image, stock: p.stock, created_at: p.createdAt || now() });
   const orderOut = (r) => !r ? null : ({ id: r.id, userId: r.user_id, customerName: r.customer_name || '', phone: r.phone || '', items: r.items || [], subtotal: r.subtotal, deliveryFee: r.delivery_fee, total: r.total, addressId: r.address_id, addressText: r.address_text, addrLat: r.addr_lat, addrLng: r.addr_lng, addrDetail: r.addr_detail || '', payment: r.payment || {}, slipImage: r.slip_image, status: r.status, statusHistory: r.status_history || [], createdAt: r.created_at });
   const orderIn = (o) => ({ id: o.id, user_id: o.userId, customer_name: o.customerName || '', phone: o.phone || '', items: o.items, subtotal: o.subtotal, delivery_fee: o.deliveryFee, total: o.total, address_id: o.addressId, address_text: o.addressText, addr_lat: o.addrLat, addr_lng: o.addrLng, addr_detail: o.addrDetail || '', payment: o.payment, slip_image: o.slipImage, status: o.status, status_history: o.statusHistory, created_at: o.createdAt });
-  const settOut = (r) => ({ deliveryFee: r.delivery_fee, freeQty: r.free_qty, adImage: r.ad_image, adEnabled: r.ad_enabled });
+  const settOut = (r) => ({ deliveryFee: r.delivery_fee, freeQty: r.free_qty, adImage: r.ad_image, adEnabled: r.ad_enabled, banners: (r.banners && r.banners.length) ? r.banners : ['assets/banner.jpg'] });
 
   async function seedAccountsAsync() {
     const demoExisting = await this.getUserByPhone('0800000000');
@@ -333,6 +333,7 @@ function makeSupabaseStore() {
       if (patch.freeQty !== undefined) row.free_qty = patch.freeQty;
       if (patch.adImage !== undefined) row.ad_image = patch.adImage;
       if (patch.adEnabled !== undefined) row.ad_enabled = patch.adEnabled;
+      if (patch.banners !== undefined) row.banners = patch.banners;
       const r = await sb('PATCH', '/rest/v1/settings?id=eq.1', row);
       Store.settings = settOut(r[0]);
       return Store.settings;
@@ -824,6 +825,14 @@ route('POST', '/api/admin/settings', async (req, res, body) => {
   if (body.adImageData) { const img = await Store.uploadImage('ad', body.adImageData); if (!img) return send(res, 400, { error: 'รูปโฆษณาไม่ถูกต้องหรือใหญ่เกิน 3MB' }); patch.adImage = img; }
   else if (body.adImage !== undefined) patch.adImage = body.adImage ? String(body.adImage).slice(0, 500) : null;
   if (body.adEnabled !== undefined) patch.adEnabled = !!body.adEnabled;
+  // แบนเนอร์หน้าแรก (สไลด์รูปได้หลายรูป)
+  if (body.addBannerData) {
+    const img = await Store.uploadImage('banner', body.addBannerData);
+    if (!img) return send(res, 400, { error: 'รูปแบนเนอร์ไม่ถูกต้องหรือใหญ่เกิน 3MB' });
+    patch.banners = [...(Store.settings.banners || []), img];
+  } else if (body.removeBanner !== undefined) {
+    patch.banners = (Store.settings.banners || []).filter((u) => u !== body.removeBanner);
+  }
   const settings = await Store.updateSettings(patch);
   broadcastSettings();
   send(res, 200, { ok: true, settings });

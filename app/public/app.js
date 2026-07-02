@@ -40,6 +40,7 @@ const S = {
   fullname: '', phone: '', email: '', password: '',
   loginPhone: '', loginPassword: '',
   otp: ['', '', '', ''], devCode: '', otpEmail: '',
+  bannerIndex: 0,
   pinLat: null, pinLng: null, currentAddr: '', addrLoading: false, wantsGeoLocate: false, geoTried: false,
   houseNo: '', addrDetail: '', addrLabel: 'บ้าน', mapStyle: 'violet', fromCheckout: false,
   saved: [], products: [], orders: [],
@@ -58,6 +59,7 @@ let leafletMap = null, leafletMarker = null, leafletTile = null;
 let adminMiniMapInst = null;
 let geocodeTimer = null, geocodeReqId = 0;
 let poiLayer = null, poiTimer = null, poiReqId = 0, poiLastKey = '';
+let bannerTimer = null;
 
 // ---------------- Helpers ----------------
 const $ = (s, r = document) => r.querySelector(s);
@@ -318,6 +320,27 @@ function lineButton(label) {
 }
 const LOGO = 'assets/logo.png';
 const BANNER = 'assets/banner.jpg';
+const bannerList = () => (S.settings.banners && S.settings.banners.length) ? S.settings.banners : [BANNER];
+// แบนเนอร์หน้าแรกแบบสไลด์รูปได้ (ไม่มีข้อความทับ)
+function bannerCarousel() {
+  const banners = bannerList();
+  if (S.bannerIndex >= banners.length) S.bannerIndex = 0;
+  const slides = banners.map((u) => `<div style="flex:0 0 100%;height:100%;background:#14101f url('${esc(u)}') center/cover"></div>`).join('');
+  const dots = banners.length > 1
+    ? `<div style="position:absolute;left:0;right:0;bottom:10px;display:flex;gap:6px;justify-content:center;z-index:2">${banners.map((_, i) => `<span class="banner-dot" style="height:6px;width:${i === S.bannerIndex ? '20px' : '6px'};border-radius:3px;background:${i === S.bannerIndex ? '#8b5cf6' : 'rgba(255,255,255,.55)'};transition:.3s"></span>`).join('')}</div>`
+    : '';
+  return `<div class="banner-carousel" style="margin:16px 16px 0;height:150px;border-radius:18px;overflow:hidden;position:relative;background:#14101f;touch-action:pan-y">
+    <div class="banner-track" style="display:flex;height:100%;width:100%;transition:transform .4s ease;transform:translateX(-${S.bannerIndex * 100}%)">${slides}</div>${dots}
+  </div>`;
+}
+function setBanner(idx) {
+  const banners = bannerList();
+  const n = banners.length; if (!n) return;
+  S.bannerIndex = ((idx % n) + n) % n;
+  const track = document.querySelector('.banner-track');
+  if (track) track.style.transform = 'translateX(-' + (S.bannerIndex * 100) + '%)';
+  document.querySelectorAll('.banner-dot').forEach((d, i) => { d.style.width = i === S.bannerIndex ? '20px' : '6px'; d.style.background = i === S.bannerIndex ? '#8b5cf6' : 'rgba(255,255,255,.55)'; });
+}
 
 // ================================================================
 // Async actions
@@ -345,7 +368,7 @@ async function uploadSlip(orderId, imageData) {
   catch (e) { toast(e.message); }
 }
 async function adminSaveAd(body) {
-  try { const r = await API.post('/api/admin/settings', body); S.settings = r.settings; render(); toast('อัปเดตโฆษณาแล้ว ✓'); }
+  try { const r = await API.post('/api/admin/settings', body); S.settings = r.settings; render(); toast('อัปเดตแล้ว ✓'); }
   catch (e) { toast(e.message); }
 }
 async function adminSaveSettings() {
@@ -583,11 +606,7 @@ function screenHome() {
       <div style="line-height:1.3;flex:1"><div style="font-size:12px;color:#9a90b0">สวัสดี · แตะเพื่อแก้ไขโปรไฟล์</div><div style="font-size:15px;font-weight:600;color:#f2eefb">${esc(name)}</div></div>
       <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:#a78bfa;font-weight:500">${IC.pin('#a78bfa')}ชุมพร</div>
     </button>
-    <div style="margin:16px 16px 0;height:150px;border-radius:18px;background:#14101f url('${BANNER}') center/cover;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:center;padding:0 22px">
-      <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,9,18,.82) 30%,rgba(11,9,18,.15) 100%)"></div>
-      <div style="color:#fff;font-size:24px;font-weight:700;line-height:1.15;position:relative;text-shadow:0 2px 8px rgba(0,0,0,.6)">พร้อมส่ง<br>แล้ววันนี้</div>
-      <div style="color:rgba(255,255,255,.92);font-size:13px;margin-top:8px;position:relative;text-shadow:0 1px 4px rgba(0,0,0,.6)">${TAGLINE} · ส่งฟรีเมื่อสั่งครบ ${S.settings.freeQty || 2} ตัว</div>
-    </div>
+    ${bannerCarousel()}
     <div style="padding:20px 16px 8px;font-size:16px;font-weight:600;color:#f2eefb">เมนูแนะนำ</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px">${tiles}</div>
     <div style="margin:14px 16px 8px;background:linear-gradient(135deg,#231d38,#1a1626);border:1px solid rgba(139,92,246,.25);border-radius:16px;padding:16px;display:flex;align-items:center;gap:14px">
@@ -916,6 +935,14 @@ function screenAdmin() {
         <button data-act="adminSaveSettings" style="width:100%;height:44px;border-radius:11px;background:rgba(139,92,246,.2);color:#c4b5fd;font-size:14px;font-weight:600;margin-top:12px">บันทึกค่าจัดส่ง</button>
       </div>
       <div style="background:#15111f;border:1px solid rgba(139,92,246,.25);border-radius:16px;padding:16px;margin-bottom:18px">
+        <div style="font-size:14px;font-weight:600;color:#f2eefb;margin-bottom:4px">🖼️ แบนเนอร์หน้าแรก (สไลด์รูปได้)</div>
+        <div style="font-size:11.5px;color:#9a90b0;margin-bottom:12px">รูปที่โชว์บนกรอบใหญ่หน้าแรก · ลูกค้าปัดเลื่อนดูได้</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
+          ${(S.settings.banners || []).map((u) => `<div style="position:relative;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1)"><img src="${esc(u)}" style="width:100%;height:90px;object-fit:cover;display:block"><button data-act="adminRemoveBanner" data-url="${esc(u)}" style="position:absolute;top:6px;right:6px;width:30px;height:30px;border-radius:50%;background:rgba(13,11,21,.85);border:1px solid rgba(255,255,255,.2);color:#f87171;font-size:15px;display:flex;align-items:center;justify-content:center">✕</button></div>`).join('') || `<div style="height:70px;border-radius:12px;border:1.5px dashed rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;color:#6a6280;font-size:13px">ยังไม่มีแบนเนอร์</div>`}
+        </div>
+        <label style="display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:11px;border:1.5px dashed rgba(139,92,246,.5);background:rgba(139,92,246,.08);color:#c4b5fd;font-size:13.5px;font-weight:600;cursor:pointer">📷 เพิ่มรูปแบนเนอร์<input type="file" accept="image/*" data-file="banner" style="display:none"></label>
+      </div>
+      <div style="background:#15111f;border:1px solid rgba(139,92,246,.25);border-radius:16px;padding:16px;margin-bottom:18px">
         <div style="font-size:14px;font-weight:600;color:#f2eefb;margin-bottom:4px">📢 รูปโฆษณา (ป๊อปอัพตอนลูกค้าเข้า)</div>
         <div style="font-size:11.5px;color:${S.settings.adEnabled ? '#34d399' : '#f87171'};margin-bottom:12px">${S.settings.adEnabled ? '● กำลังแสดงให้ลูกค้าเห็นตอนล็อกอิน' : '○ ปิดการแสดงอยู่'}</div>
         ${S.settings.adImage ? `<img src="${esc(S.settings.adImage)}" alt="โฆษณา" style="width:100%;border-radius:12px;border:1px solid rgba(255,255,255,.1);margin-bottom:10px;display:block">` : `<div style="height:90px;border-radius:12px;border:1.5px dashed rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;color:#6a6280;font-size:13px;margin-bottom:10px">ยังไม่มีรูปโฆษณา</div>`}
@@ -996,6 +1023,7 @@ const ACT = {
   closeAd: () => closeAd(),
   adminToggleAd: () => adminSaveAd({ adEnabled: !S.settings.adEnabled }),
   adminRemoveAd: () => adminSaveAd({ adImage: '' }),
+  adminRemoveBanner: (el) => adminSaveAd({ removeBanner: el.dataset.url }),
   addCart: (el) => { if (addToCart(el.dataset.id)) { const p = productById(el.dataset.id); render(); toast('เพิ่ม ' + (p ? p.name : 'สินค้า') + ' ลงตะกร้าแล้ว ✓'); } },
   incQty: (el) => { setQty(el.dataset.id, 1); render(); },
   decQty: (el) => { setQty(el.dataset.id, -1); render(); },
@@ -1023,6 +1051,7 @@ const ACT = {
 function render() {
   // ทำลาย instance แผนที่จริงเมื่อออกจากหน้าที่ใช้มัน (กัน leak + ไม่ให้ค้างอ้างอิง DOM ที่ถูกแทนที่)
   if (leafletMap && S.screen !== 'map') { leafletMap.remove(); leafletMap = null; leafletMarker = null; leafletTile = null; poiLayer = null; poiLastKey = ''; clearTimeout(geocodeTimer); clearTimeout(poiTimer); }
+  clearInterval(bannerTimer); // ตัวสไลด์แบนเนอร์ — wire() จะตั้งใหม่ถ้าอยู่หน้าแรก
   if (adminMiniMapInst && !(S.screen === 'admin' && S.adminOrderId)) { adminMiniMapInst.remove(); adminMiniMapInst = null; }
   const screens = { welcome: screenWelcome, register: screenRegister, login: screenLogin, otp: screenOtp, home: screenHome, method: screenMethod, map: screenMap, saved: screenSaved, profile: screenProfile, cart: screenCart, checkout: screenCheckout, orders: screenOrders, admin: screenAdmin };
   if (S.screen === 'checkout' && !S.checkoutAddressId && S.saved.length) S.checkoutAddressId = S.saved[0].id;
@@ -1049,6 +1078,7 @@ function wire() {
         if (target === 'new') { S.npImageData = data; S.npImageName = f.name; render(); }
         else if (target === 'avatar') { S.pfAvatarData = data; render(); }
         else if (target === 'ad') adminSaveAd({ adImageData: data });
+        else if (target === 'banner') adminSaveAd({ addBannerData: data });
         else if (target.startsWith('prod:')) adminSetImage(target.slice(5), data);
         else if (target.startsWith('slip:')) uploadSlip(target.slice(5), data);
       };
@@ -1059,6 +1089,17 @@ function wire() {
   if (root.querySelector('#admin-mini-map') && S.adminOrderId) {
     const ord = S.adminOrders.find((x) => x.id === S.adminOrderId);
     if (ord) renderAdminMiniMap(root, ord.addrLat, ord.addrLng);
+  }
+  // สไลด์แบนเนอร์หน้าแรก: ปัดเปลี่ยนรูป + เลื่อนอัตโนมัติ
+  const carousel = root.querySelector('.banner-carousel');
+  if (carousel) {
+    const banners = bannerList();
+    let sx = null, sy = null, swiping = false;
+    carousel.onpointerdown = (e) => { sx = e.clientX; sy = e.clientY; swiping = false; };
+    carousel.onpointermove = (e) => { if (sx == null) return; if (Math.abs(e.clientX - sx) > 10 && Math.abs(e.clientX - sx) > Math.abs(e.clientY - sy)) swiping = true; };
+    carousel.onpointerup = (e) => { if (sx != null && swiping) { const dx = e.clientX - sx; if (Math.abs(dx) > 40) setBanner(S.bannerIndex + (dx < 0 ? 1 : -1)); } sx = null; };
+    carousel.onpointercancel = () => { sx = null; };
+    if (banners.length > 1) bannerTimer = setInterval(() => setBanner(S.bannerIndex + 1), 4500);
   }
 }
 
