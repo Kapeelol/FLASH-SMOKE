@@ -882,17 +882,24 @@ route('DELETE', '/api/admin/products', async (req, res, body) => {
 // Static serving
 // ------------------------------------------------------------------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.ico': 'image/x-icon' };
+// html/js/css ต้องไม่ถูกแคชนาน ๆ (มิฉะนั้นมือถือบางเครื่องจะยังเห็นโค้ดเก่าแม้ deploy ใหม่แล้ว)
+// ส่วนรูปที่อัปโหลด (มีชื่อไฟล์สุ่มไม่ซ้ำ) แคชยาวได้ปลอดภัย เพราะเปลี่ยนรูป = ชื่อไฟล์ใหม่เสมอ
+const NO_CACHE_EXT = new Set(['.html', '.js', '.css']);
 function serveStatic(req, res, urlPath) {
   let rel = decodeURIComponent(urlPath.split('?')[0]);
   if (rel === '/') rel = '/index.html';
   const filePath = path.normalize(path.join(PUBLIC_DIR, rel));
   if (!filePath.startsWith(PUBLIC_DIR)) return send(res, 403, { error: 'forbidden' });
+  const ext = path.extname(filePath).toLowerCase();
+  const cacheHeader = NO_CACHE_EXT.has(ext) || ext === ''
+    ? { 'Cache-Control': 'no-cache' }
+    : { 'Cache-Control': 'public, max-age=604800' };
   fs.readFile(filePath, (err, data) => {
     if (err) return fs.readFile(path.join(PUBLIC_DIR, 'index.html'), (e2, html) => {
       if (e2) return send(res, 404, { error: 'not found' });
-      res.writeHead(200, { 'Content-Type': MIME['.html'] }); res.end(html);
+      res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' }); res.end(html);
     });
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', ...cacheHeader });
     res.end(data);
   });
 }
