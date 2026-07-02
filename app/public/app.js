@@ -751,7 +751,15 @@ function screenAdminOrder() {
       </div>
       <div style="font-size:13px;font-weight:600;color:#f2eefb;margin-bottom:8px">ตำแหน่งจัดส่ง</div>
       ${o.addrLat != null && o.addrLng != null
-        ? `<div style="position:relative;height:170px;border-radius:14px;overflow:hidden;background:#14101f;border:1px solid rgba(255,255,255,.08)"><div id="admin-mini-map" style="position:absolute;inset:0"></div><div style="position:absolute;left:10px;bottom:10px;background:rgba(13,11,21,.85);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:6px 10px;font-size:11px;color:#c4b5fd;font-weight:500;z-index:1000;pointer-events:none">📍 ตำแหน่งที่ลูกค้าปักหมุด</div></div>`
+        ? `<div style="position:relative;height:170px;border-radius:14px;overflow:hidden;background:#14101f;border:1px solid rgba(255,255,255,.08)">
+             <div id="admin-mini-map" style="position:absolute;inset:0"></div>
+             <a href="https://www.google.com/maps/search/?api=1&query=${o.addrLat},${o.addrLng}" target="_blank" rel="noopener" style="position:absolute;inset:0;z-index:1000;display:block" aria-label="เปิดใน Google Maps"></a>
+             <div style="position:absolute;left:10px;bottom:10px;background:rgba(13,11,21,.85);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:6px 10px;font-size:11px;color:#c4b5fd;font-weight:500;z-index:1001;pointer-events:none">📍 แตะแผนที่เพื่อเปิดใน Google Maps</div>
+           </div>
+           <div style="display:flex;gap:8px;margin-top:10px">
+             <a href="https://www.google.com/maps/dir/?api=1&destination=${o.addrLat},${o.addrLng}" target="_blank" rel="noopener" style="flex:1;height:44px;border-radius:12px;background:${BTN};color:#fff;font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none">🧭 นำทางด้วย Google Maps</a>
+             <a href="https://www.google.com/maps/search/?api=1&query=${o.addrLat},${o.addrLng}" target="_blank" rel="noopener" style="width:52px;height:44px;border-radius:12px;background:#1a1626;border:1px solid rgba(255,255,255,.1);color:#c4b5fd;font-size:18px;display:flex;align-items:center;justify-content:center;text-decoration:none" aria-label="ดูตำแหน่ง">📍</a>
+           </div>`
         : `<div style="height:90px;border-radius:14px;background:#14101f;border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;color:#6a6280;font-size:12.5px">ไม่มีข้อมูลพิกัด</div>`}
       <div style="font-size:12.5px;color:#9a90b0;margin-top:8px;line-height:1.5">${esc(o.addressText || '-')}</div>
       ${o.addrLat != null ? `<div style="font-size:11px;color:#6a6280;margin-top:3px">พิกัดหมุด: ${Number(o.addrLat).toFixed(5)}, ${Number(o.addrLng).toFixed(5)}</div>` : ''}
