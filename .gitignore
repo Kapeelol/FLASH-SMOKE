@@ -12,6 +12,12 @@ app/public/uploads/*
 .env
 .env.local
 *.env
+*secret*.txt
+*Secret*.txt
+API.txt
+Supabase.txt
+*api*key*.txt
+*API*Key*.txt
 
 # ทั่วไป
 node_modules/
