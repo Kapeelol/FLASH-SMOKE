@@ -22,6 +22,8 @@ input:focus{border-color:rgba(167,139,250,.6)!important}
 
 /* แผนที่จริง (Leaflet) — ปรับให้เข้ากับธีมมืดของแอป */
 .leaflet-container{background:#14101f;font-family:'Prompt',sans-serif}
-.fs-leaflet-pin{background:transparent!important;border:none!important}
+.fs-leaflet-pin,.fs-poi-pin{background:transparent!important;border:none!important}
+.fs-poi-tip{background:#1a1626!important;color:#f2eefb!important;border:1px solid rgba(167,139,250,.4)!important;border-radius:8px!important;font-family:'Prompt',sans-serif!important;font-size:12px!important;font-weight:500!important;box-shadow:0 4px 12px rgba(0,0,0,.5)!important;padding:4px 9px!important}
+.fs-poi-tip::before{border-top-color:rgba(167,139,250,.4)!important}
 .leaflet-control-attribution{background:rgba(13,11,21,.75)!important;color:#9a90b0!important;font-size:9.5px!important}
 .leaflet-control-attribution a{color:#c4b5fd!important}

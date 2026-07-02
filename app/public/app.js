@@ -57,6 +57,7 @@ let pendingLineError = '';
 let leafletMap = null, leafletMarker = null, leafletTile = null;
 let adminMiniMapInst = null;
 let geocodeTimer = null, geocodeReqId = 0;
+let poiLayer = null, poiTimer = null, poiReqId = 0, poiLastKey = '';
 
 // ---------------- Helpers ----------------
 const $ = (s, r = document) => r.querySelector(s);
@@ -69,7 +70,9 @@ function toast(msg) {
 }
 // ---------------- Popup โฆษณา (เฉพาะลูกค้า ตอนล็อกอิน) ----------------
 let adShown = false;
+const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
 function closeAd() { const h = document.getElementById('modal-host'); if (h) h.innerHTML = ''; }
+function dismissAdToday() { localStorage.setItem('fs_ad_dismissed_date', todayStr()); closeAd(); }
 function showAdPopup() {
   const url = S.settings && S.settings.adImage;
   if (!url) return;
@@ -79,16 +82,19 @@ function showAdPopup() {
     <div style="position:relative;width:100%;max-width:320px;animation:fs-pop .35s ease">
       <img src="${esc(url)}" alt="โฆษณา" style="width:100%;border-radius:18px;border:1px solid rgba(255,255,255,.15);box-shadow:0 24px 60px -18px rgba(124,58,237,.85);display:block">
       <button class="ad-close" style="position:absolute;top:-13px;right:-6px;width:34px;height:34px;border-radius:50%;background:#1a1626;border:1px solid rgba(255,255,255,.2);color:#f2eefb;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(0,0,0,.5);cursor:pointer">✕</button>
+      <button class="ad-dismiss-today" style="width:100%;margin-top:12px;height:42px;border-radius:12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#c9c2da;font-size:13.5px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer">☑ ไม่แสดงอีกในวันนี้</button>
     </div>
   </div>`;
   const bd = host.querySelector('.ad-backdrop');
   bd.onclick = (e) => { if (e.target === bd) closeAd(); };
   host.querySelector('.ad-close').onclick = closeAd;
+  host.querySelector('.ad-dismiss-today').onclick = dismissAdToday;
 }
 function maybeShowAd() {
   if (adShown) return;
   if (!(S.user && S.user.role !== 'admin')) return;             // เฉพาะลูกค้า ไม่ใช่แอดมิน
   if (!(S.settings && S.settings.adEnabled && S.settings.adImage)) return;
+  if (localStorage.getItem('fs_ad_dismissed_date') === todayStr()) return; // ลูกค้ากด "ไม่แสดงอีกวันนี้" แล้ว
   adShown = true;
   showAdPopup();
 }
@@ -170,6 +176,36 @@ function locateAndCenter(showToast) {
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
   );
 }
+// หมุดสถานที่สำคัญ (ร้านอาหาร/ร้านเหล้า/ร้านสะดวกซื้อ) — วงกลมเล็กมีอิโมจิ ต่างจากหมุดจัดส่งสีม่วงใหญ่
+function poiDivIcon(icon) {
+  return L.divIcon({
+    className: 'fs-poi-pin',
+    html: `<div style="width:26px;height:26px;border-radius:50%;background:rgba(13,11,21,.9);border:1.5px solid rgba(167,139,250,.8);display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,.5)">${icon}</div>`,
+    iconSize: [26, 26], iconAnchor: [13, 13]
+  });
+}
+function loadPlaces(lat, lng) {
+  if (!leafletMap || !poiLayer) return;
+  // ไม่ยิงซ้ำถ้าจุดกึ่งกลางขยับนิดเดียว (ปัดพิกัดเป็นคีย์ ~1.1 กม.)
+  const key = lat.toFixed(2) + ',' + lng.toFixed(2);
+  if (key === poiLastKey) return;
+  poiLastKey = key;
+  const myReq = ++poiReqId;
+  API.get('/api/places?lat=' + lat + '&lng=' + lng + '&radius=1800').then((r) => {
+    if (myReq !== poiReqId || !poiLayer) return;
+    poiLayer.clearLayers();
+    (r.places || []).forEach((p) => {
+      L.marker([p.lat, p.lng], { icon: poiDivIcon(p.icon), interactive: true, keyboard: false })
+        .bindTooltip(p.name, { direction: 'top', offset: [0, -12], className: 'fs-poi-tip' })
+        .addTo(poiLayer);
+    });
+  }).catch(() => {});
+}
+function scheduleLoadPlaces() {
+  if (!leafletMap) return;
+  clearTimeout(poiTimer);
+  poiTimer = setTimeout(() => { const c = leafletMap.getCenter(); loadPlaces(c.lat, c.lng); }, 700);
+}
 function initLeafletMap(root) {
   const container = root.querySelector('#leaflet-map');
   if (!container || typeof L === 'undefined') return;
@@ -177,12 +213,15 @@ function initLeafletMap(root) {
   const startLng = S.pinLng != null ? S.pinLng : CHUMPHON_CENTER.lng;
   leafletMap = L.map(container, { zoomControl: false, attributionControl: true }).setView([startLat, startLng], S.pinLat != null ? 16 : 14);
   switchTileLayer();
-  leafletMarker = L.marker([startLat, startLng], { draggable: true, icon: purpleDivIcon() }).addTo(leafletMap);
+  poiLayer = L.layerGroup().addTo(leafletMap);
+  leafletMarker = L.marker([startLat, startLng], { draggable: true, icon: purpleDivIcon(), zIndexOffset: 1000 }).addTo(leafletMap);
   leafletMarker.on('dragend', () => { const ll = leafletMarker.getLatLng(); setPin(ll.lat, ll.lng, false); });
   leafletMap.on('click', (e) => { leafletMarker.setLatLng(e.latlng); setPin(e.latlng.lat, e.latlng.lng, false); });
+  leafletMap.on('moveend', scheduleLoadPlaces); // โหลดสถานที่ใหม่เมื่อเลื่อนแผนที่
   // แก้บั๊กที่ Leaflet คำนวณขนาด container ผิดตอนสร้างครั้งแรก (มักเกิดเพราะ container ยังไม่มีขนาดจริงตอนนั้น) — วัดใหม่แล้วปักกึ่งกลางซ้ำ
   setTimeout(() => { if (leafletMap) { leafletMap.invalidateSize(); leafletMap.setView([startLat, startLng], leafletMap.getZoom()); } }, 0);
   updateStyleButtons(root);
+  loadPlaces(startLat, startLng);
   if (S.wantsGeoLocate) { S.wantsGeoLocate = false; locateAndCenter(true); }
   else { S.pinLat = startLat; S.pinLng = startLng; scheduleReverseGeocode(startLat, startLng); }
 }
@@ -920,7 +959,7 @@ const ACT = {
 // ================================================================
 function render() {
   // ทำลาย instance แผนที่จริงเมื่อออกจากหน้าที่ใช้มัน (กัน leak + ไม่ให้ค้างอ้างอิง DOM ที่ถูกแทนที่)
-  if (leafletMap && S.screen !== 'map') { leafletMap.remove(); leafletMap = null; leafletMarker = null; leafletTile = null; clearTimeout(geocodeTimer); }
+  if (leafletMap && S.screen !== 'map') { leafletMap.remove(); leafletMap = null; leafletMarker = null; leafletTile = null; poiLayer = null; poiLastKey = ''; clearTimeout(geocodeTimer); clearTimeout(poiTimer); }
   if (adminMiniMapInst && !(S.screen === 'admin' && S.adminOrderId)) { adminMiniMapInst.remove(); adminMiniMapInst = null; }
   const screens = { welcome: screenWelcome, register: screenRegister, login: screenLogin, otp: screenOtp, home: screenHome, method: screenMethod, map: screenMap, saved: screenSaved, profile: screenProfile, cart: screenCart, checkout: screenCheckout, orders: screenOrders, admin: screenAdmin };
   if (S.screen === 'checkout' && !S.checkoutAddressId && S.saved.length) S.checkoutAddressId = S.saved[0].id;

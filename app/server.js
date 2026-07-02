@@ -631,6 +631,43 @@ route('GET', '/api/geocode/reverse', async (req, res) => {
   }
 });
 
+// ---- สถานที่สำคัญใกล้เคียง (ร้านอาหาร/ร้านเหล้า/ร้านสะดวกซื้อ) จาก OpenStreetMap Overpass ----
+function poiCategory(tags) {
+  const a = tags.amenity, s = tags.shop;
+  if (a === 'bar' || a === 'pub' || a === 'nightclub' || s === 'alcohol' || s === 'wine' || s === 'beverages') return { cat: 'drink', icon: '🍺' };
+  if (a === 'cafe') return { cat: 'food', icon: '☕' };
+  if (a === 'restaurant' || a === 'fast_food' || a === 'food_court') return { cat: 'food', icon: '🍜' };
+  if (s === 'convenience' || s === 'supermarket' || s === 'mall' || s === 'department_store') return { cat: 'store', icon: '🏪' };
+  return { cat: 'other', icon: '📍' };
+}
+route('GET', '/api/places', async (req, res) => {
+  const q = query(req);
+  const lat = Number(q.get('lat')), lng = Number(q.get('lng'));
+  let radius = Math.min(4000, Math.max(300, Number(q.get('radius')) || 1500));
+  if (!isFinite(lat) || !isFinite(lng)) return send(res, 400, { error: 'พิกัดไม่ถูกต้อง' });
+  const ql = `[out:json][timeout:20];(` +
+    `node["amenity"~"^(restaurant|fast_food|cafe|food_court|bar|pub|nightclub)$"](around:${radius},${lat},${lng});` +
+    `node["shop"~"^(alcohol|wine|beverages|convenience|supermarket|mall|department_store)$"](around:${radius},${lat},${lng});` +
+    `);out body 80;`;
+  const body = 'data=' + encodeURIComponent(ql);
+  try {
+    const r = await httpsJson({
+      hostname: 'overpass-api.de', path: '/api/interpreter', method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json', 'Content-Length': Buffer.byteLength(body), 'User-Agent': 'FlashSmokeDelivery/1.0 (+https://flash-smoke.onrender.com)' }
+    }, body);
+    if (r.status !== 200) console.error('[places] overpass status', r.status, r.raw.slice(0, 120));
+    const els = (r.json && r.json.elements) || [];
+    const places = els.filter((e) => e.tags && e.tags.name && e.lat && e.lon).map((e) => {
+      const c = poiCategory(e.tags);
+      return { name: String(e.tags.name).slice(0, 60), lat: e.lat, lng: e.lon, cat: c.cat, icon: c.icon };
+    }).slice(0, 80);
+    send(res, 200, { places });
+  } catch (e) {
+    console.error('[places] overpass failed', e.message);
+    send(res, 200, { places: [] }); // ไม่ให้ล้มทั้งแผนที่ ถ้า Overpass ล่ม
+  }
+});
+
 // ---- Addresses ----
 route('GET', '/api/addresses', async (req, res) => {
   const u = await getAuthUser(req); if (!u) return send(res, 401, { error: 'unauthorized' });
