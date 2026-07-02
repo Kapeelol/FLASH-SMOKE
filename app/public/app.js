@@ -336,10 +336,6 @@ function screenLogin() {
       </div>
       <label style="display:block;font-size:13px;font-weight:500;color:#b6acce;margin:16px 0 7px">รหัสผ่าน</label>
       <input data-model="loginPassword" type="password" placeholder="รหัสผ่าน" style="width:100%;height:52px;border-radius:14px;border:1.5px solid rgba(255,255,255,.1);background:#1a1626;padding:0 16px;font-size:15px;color:#f2eefb;outline:none">
-      <div style="margin-top:18px;background:#15111f;border:1px solid rgba(139,92,246,.25);border-radius:12px;padding:12px 14px;font-size:12px;color:#9a90b0;line-height:1.7">
-        <div style="color:#c4b5fd;font-weight:600;margin-bottom:2px">บัญชีทดลอง</div>
-        ลูกค้า: <span style="color:#f2eefb">0800000000 / demo1234</span><br>แอดมิน: <span style="color:#f2eefb">0899999999 / admin1234</span>
-      </div>
     </div>
     <div style="padding:12px 22px 30px">
       <button data-act="doLogin" style="width:100%;height:54px;border-radius:16px;background:${BTN};color:#fff;font-size:16px;font-weight:600;box-shadow:0 14px 26px -14px rgba(124,58,237,.9)">เข้าสู่ระบบ</button>
