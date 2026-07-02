@@ -746,6 +746,7 @@ route('DELETE', '/api/addresses', async (req, res, body) => {
 // ---- Orders (customer) — with stock ----
 route('POST', '/api/orders', async (req, res, body) => {
   const u = await getAuthUser(req); if (!u) return send(res, 401, { error: 'unauthorized' });
+  if (!u.verified || !u.phone) return send(res, 403, { error: 'กรุณายืนยันเบอร์โทรก่อนสั่งซื้อ', needPhone: true });
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) return send(res, 400, { error: 'ตะกร้าว่าง' });
   for (const it of items) {

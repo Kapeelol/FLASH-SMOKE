@@ -40,8 +40,8 @@ const S = {
   fullname: '', phone: '', email: '', password: '',
   loginPhone: '', loginPassword: '',
   otp: ['', '', '', ''], devCode: '', otpEmail: '',
-  pinLat: null, pinLng: null, currentAddr: '', addrLoading: false, wantsGeoLocate: false,
-  addrDetail: '', addrLabel: 'บ้าน', mapStyle: 'violet', fromCheckout: false,
+  pinLat: null, pinLng: null, currentAddr: '', addrLoading: false, wantsGeoLocate: false, geoTried: false,
+  houseNo: '', addrDetail: '', addrLabel: 'บ้าน', mapStyle: 'violet', fromCheckout: false,
   saved: [], products: [], orders: [],
   settings: { deliveryFee: 20, freeQty: 2 },
   cart: JSON.parse(localStorage.getItem('fs_cart') || '[]'),
@@ -97,6 +97,44 @@ function maybeShowAd() {
   if (localStorage.getItem('fs_ad_dismissed_date') === todayStr()) return; // ลูกค้ากด "ไม่แสดงอีกวันนี้" แล้ว
   adShown = true;
   showAdPopup();
+}
+// ---------------- Popup ยืนยันเบอร์โทร (ลูกค้าที่ล็อกอินด้วย LINE ยังไม่มีเบอร์) ----------------
+const needsPhone = () => !!(S.user && S.user.role !== 'admin' && !S.user.phone);
+function showPhonePopup(mandatory) {
+  const host = document.getElementById('modal-host');
+  host.innerHTML = `
+  <div class="phone-backdrop" style="position:absolute;inset:0;z-index:95;background:rgba(5,4,9,.86);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:26px;animation:fs-fade .25s ease">
+    <div style="width:100%;max-width:330px;background:#161221;border:1px solid rgba(139,92,246,.3);border-radius:20px;padding:24px;animation:fs-pop .35s ease">
+      <div style="font-size:40px;text-align:center">📱</div>
+      <div style="font-size:18px;font-weight:700;color:#f2eefb;text-align:center;margin-top:6px">ยืนยันเบอร์โทรศัพท์</div>
+      <div style="font-size:13px;color:#9a90b0;text-align:center;margin-top:6px;line-height:1.5">${mandatory ? 'ต้องยืนยันเบอร์โทรก่อนสั่งซื้อ' : 'กรอกเบอร์โทรเพื่อใช้ติดต่อและสั่งซื้อ'}</div>
+      <div style="display:flex;align-items:center;height:52px;border-radius:14px;border:1.5px solid rgba(255,255,255,.1);background:#0f0c18;padding:0 16px;gap:10px;margin-top:18px">
+        <span style="font-size:15px;color:#9a90b0;font-weight:500;border-right:1px solid rgba(255,255,255,.12);padding-right:10px">+66</span>
+        <input class="phone-input" inputmode="numeric" placeholder="08X-XXX-XXXX" style="flex:1;border:none;outline:none;font-size:15px;color:#f2eefb;background:none;height:100%">
+      </div>
+      <button class="phone-submit" style="width:100%;height:50px;border-radius:14px;background:${BTN};color:#fff;font-size:15px;font-weight:600;margin-top:16px">บันทึกเบอร์โทร</button>
+      ${mandatory ? '' : '<button class="phone-skip" style="width:100%;height:38px;color:#6a6280;font-size:12.5px;margin-top:6px;background:none;border:none;cursor:pointer">ข้ามไปก่อน</button>'}
+    </div>
+  </div>`;
+  const inp = host.querySelector('.phone-input');
+  setTimeout(() => inp.focus(), 100);
+  host.querySelector('.phone-submit').onclick = async () => {
+    const phone = (inp.value || '').replace(/\D/g, '');
+    if (phone.length < 9) return toast('เบอร์โทรไม่ถูกต้อง');
+    try {
+      const r = await API.post('/api/me/update', { phone });
+      S.user = r.user; closeAd();
+      toast('บันทึกเบอร์โทรแล้ว ✓');
+      if (S.screen === 'home') render();
+    } catch (e) { toast(e.message); }
+  };
+  const skip = host.querySelector('.phone-skip');
+  if (skip) skip.onclick = closeAd;
+}
+// เรียกตอนเข้าเว็บ: ถ้าลูกค้ายังไม่มีเบอร์ ให้ขึ้น popup ใส่เบอร์ก่อน (ไม่งั้นค่อยโชว์โฆษณา)
+function maybeGatePhoneOrAd() {
+  if (needsPhone()) showPhonePopup(false);
+  else maybeShowAd();
 }
 const savedMeta = (kind) => kind === 'home' ? { emoji: '🏠', iconBg: 'rgba(139,92,246,.2)' } : kind === 'work' ? { emoji: '💼', iconBg: 'rgba(192,38,211,.2)' } : { emoji: '📍', iconBg: 'rgba(79,70,229,.22)' };
 const kindFromLabel = (l) => l === 'บ้าน' ? 'home' : (l === 'ที่ทำงาน' ? 'work' : 'other');
@@ -162,8 +200,8 @@ function setPin(lat, lng, fly) {
   if (fly && leafletMap) leafletMap.flyTo([lat, lng], Math.max(leafletMap.getZoom(), 16));
   scheduleReverseGeocode(lat, lng);
 }
-function locateAndCenter(showToast) {
-  if (!navigator.geolocation) { toast('เบราว์เซอร์นี้ไม่รองรับ GPS'); return; }
+function locateAndCenter(showToast, silentFail) {
+  if (!navigator.geolocation) { if (showToast) toast('เบราว์เซอร์นี้ไม่รองรับ GPS'); return; }
   if (showToast) toast('กำลังค้นหาตำแหน่ง GPS...');
   navigator.geolocation.getCurrentPosition(
     (pos) => {
@@ -172,7 +210,7 @@ function locateAndCenter(showToast) {
       setPin(latitude, longitude, true);
       if (showToast) toast('ปักหมุดที่ตำแหน่งของคุณแล้ว');
     },
-    () => toast('ไม่สามารถเข้าถึงตำแหน่งได้ กรุณาอนุญาตการเข้าถึงตำแหน่ง'),
+    () => { if (!silentFail) toast('ไม่สามารถเข้าถึงตำแหน่งได้ กรุณาอนุญาตการเข้าถึงตำแหน่ง'); },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
   );
 }
@@ -222,8 +260,11 @@ function initLeafletMap(root) {
   setTimeout(() => { if (leafletMap) { leafletMap.invalidateSize(); leafletMap.setView([startLat, startLng], leafletMap.getZoom()); } }, 0);
   updateStyleButtons(root);
   loadPlaces(startLat, startLng);
+  // ตั้งหมุดชั่วคราวไว้ก่อน (เผื่อ GPS ถูกปฏิเสธ จะได้ยังบันทึกได้)
+  S.pinLat = startLat; S.pinLng = startLng;
+  scheduleReverseGeocode(startLat, startLng);
   if (S.wantsGeoLocate) { S.wantsGeoLocate = false; locateAndCenter(true); }
-  else { S.pinLat = startLat; S.pinLng = startLng; scheduleReverseGeocode(startLat, startLng); }
+  else if (!S.geoTried) { S.geoTried = true; locateAndCenter(false, true); } // ครั้งแรก: ลองหาตำแหน่งจริงเงียบ ๆ กันหมุดเริ่มที่กลางเมือง (มั่ว)
 }
 function renderAdminMiniMap(root, lat, lng) {
   const container = root.querySelector('#admin-mini-map');
@@ -356,18 +397,27 @@ async function afterLogin() {
   if (S.user.role === 'admin') { await adminLoad(); S.screen = 'admin'; }
   else { await loadUserData(); S.screen = 'home'; }
   render();
-  maybeShowAd();
+  maybeGatePhoneOrAd();
 }
 function lineLogin() { window.location.href = '/api/auth/line/login'; }
 async function saveAddress() {
   if (S.busy) return;
   if (S.pinLat == null || S.pinLng == null) return toast('กรุณาปักหมุดตำแหน่งก่อน');
+  if (!S.houseNo.trim()) return toast('กรุณากรอกบ้านเลขที่');
   S.busy = true;
-  const base = S.currentAddr || (S.pinLat.toFixed(5) + ', ' + S.pinLng.toFixed(5));
-  const text = base + (S.addrDetail.trim() ? (' (' + S.addrDetail.trim() + ')') : '');
+  const lat = S.pinLat, lng = S.pinLng;
   try {
-    const r = await API.post('/api/addresses', { label: S.addrLabel, kind: kindFromLabel(S.addrLabel), text, detail: S.addrDetail.trim(), lat: S.pinLat, lng: S.pinLng });
-    S.addrDetail = ''; await loadUserData();
+    // ค้นที่อยู่ของ "พิกัดหมุดล่าสุดจริง ๆ" อีกครั้งตอนกดบันทึก เพื่อกันกรณีข้อความค้างจากตำแหน่งเก่า (พิกัดมั่ว)
+    let base = S.currentAddr;
+    if (!base || S.addrLoading) {
+      try { const g = await API.get('/api/geocode/reverse?lat=' + lat + '&lng=' + lng); base = g.address; } catch {}
+    }
+    base = base || (lat.toFixed(5) + ', ' + lng.toFixed(5));
+    // ประกอบเป็นที่อยู่เต็ม: บ้านเลขที่ + ที่อยู่จากแผนที่ (+ รายละเอียดเพิ่มเติม)
+    let text = S.houseNo.trim() + ' ' + base;
+    if (S.addrDetail.trim()) text += ' (' + S.addrDetail.trim() + ')';
+    const r = await API.post('/api/addresses', { label: S.addrLabel, kind: kindFromLabel(S.addrLabel), text, detail: S.addrDetail.trim(), lat, lng });
+    S.houseNo = ''; S.addrDetail = ''; await loadUserData();
     if (S.fromCheckout) { S.fromCheckout = false; S.checkoutAddressId = r.address.id; S.screen = 'checkout'; } else S.screen = 'saved';
     render(); toast('บันทึกที่อยู่แล้ว ✓');
   } catch (e) { toast(e.message); } finally { S.busy = false; }
@@ -375,6 +425,7 @@ async function saveAddress() {
 async function deleteAddress(id) { try { await API.del('/api/addresses', { id }); await loadUserData(); render(); toast('ลบที่อยู่แล้ว'); } catch (e) { toast(e.message); } }
 async function placeOrder() {
   if (S.busy) return;
+  if (needsPhone()) { toast('กรุณายืนยันเบอร์โทรก่อนสั่งซื้อ'); showPhonePopup(true); return; }
   if (!S.cart.length) return toast('ตะกร้าว่าง');
   if (!S.checkoutAddressId) return toast('กรุณาเลือกที่อยู่จัดส่ง');
   S.busy = true;
@@ -383,7 +434,10 @@ async function placeOrder() {
     S.cart = []; saveCart(); S.orderNote = '';
     await loadUserData(); S.screen = 'orders'; render();
     toast('สั่งซื้อสำเร็จ 🎉 กำลังจัดเตรียม');
-  } catch (e) { toast(e.message); } finally { S.busy = false; }
+  } catch (e) {
+    if (e.status === 403 && e.data && e.data.needPhone) { toast('กรุณายืนยันเบอร์โทรก่อนสั่งซื้อ'); showPhonePopup(true); }
+    else toast(e.message);
+  } finally { S.busy = false; }
 }
 async function refreshOrders() { await loadUserData(); render(); toast('อัปเดตแล้ว'); }
 // admin
@@ -591,6 +645,7 @@ function screenMap() {
         <button data-act="labelWork" style="flex:1;height:38px;border-radius:11px;font-size:13px;font-weight:500;background:${lw.bg};color:${lw.fg};border:1px solid ${lw.bd}">💼 ที่ทำงาน</button>
         <button data-act="labelOther" style="flex:1;height:38px;border-radius:11px;font-size:13px;font-weight:500;background:${lo.bg};color:${lo.fg};border:1px solid ${lo.bd}">📍 อื่นๆ</button>
       </div>
+      <input data-model="houseNo" placeholder="บ้านเลขที่ / ชื่ออาคาร เช่น 123/45" style="width:100%;height:46px;border-radius:12px;border:1.5px solid rgba(167,139,250,.4);background:#0f0c18;padding:0 14px;font-size:14px;color:#f2eefb;outline:none;margin-top:10px">
       <input data-model="addrDetail" placeholder="รายละเอียดเพิ่มเติม เช่น ตึก B ชั้น 3, จุดสังเกต" style="width:100%;height:46px;border-radius:12px;border:1.5px solid rgba(255,255,255,.1);background:#0f0c18;padding:0 14px;font-size:14px;color:#f2eefb;outline:none;margin-top:10px">
       <button data-act="saveAddr" style="width:100%;height:52px;border-radius:15px;background:${BTN};color:#fff;font-size:16px;font-weight:600;box-shadow:0 12px 24px -12px rgba(124,58,237,.9);margin-top:12px">บันทึกที่อยู่นี้</button>
     </div>
@@ -931,7 +986,7 @@ function go(s) { S.screen = s; render(); }
 const ACT = {
   goWelcome: () => go('welcome'), goRegister: () => go('register'), goLogin: () => go('login'),
   goHome: () => go('home'), goMethod: () => go('method'), goMap: () => go('map'), goSaved: () => go('saved'),
-  goCart: () => go('cart'), goCheckout: () => go('checkout'), goOrders: () => go('orders'),
+  goCart: () => go('cart'), goCheckout: () => { if (needsPhone()) { toast('กรุณายืนยันเบอร์โทรก่อนสั่งซื้อ'); showPhonePopup(true); return; } go('checkout'); }, goOrders: () => go('orders'),
   goProfile: () => { S.pfName = (S.user && S.user.fullname) || ''; S.pfPhone = (S.user && S.user.phone) || ''; S.pfAvatarData = ''; go('profile'); },
   saveProfile, adminSaveSettings,
   adminOpenOrder: (el) => { S.adminOrderId = el.dataset.id; render(); },
@@ -1076,7 +1131,7 @@ async function boot() {
     } catch { API.setToken(''); S.screen = 'welcome'; }
   } else { await loadProducts(); }
   render();
-  maybeShowAd();
+  maybeGatePhoneOrAd();
   if (pendingLineError) {
     const msg = { notconfigured: 'ยังไม่ได้ตั้งค่า LINE Login (ผู้ดูแลต้องใส่ Channel ID/Secret)', state: 'เซสชันหมดอายุ ลองเข้าสู่ระบบใหม่', failed: 'เข้าสู่ระบบด้วย LINE ไม่สำเร็จ' }[pendingLineError] || 'เข้าสู่ระบบ LINE ไม่สำเร็จ';
     toast(msg); pendingLineError = '';
