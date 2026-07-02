@@ -6,6 +6,7 @@ create table if not exists users (
   id           text primary key,
   fullname     text not null default '',
   phone        text unique,
+  email        text,
   salt         text,
   hash         text,
   verified     boolean not null default false,
@@ -14,6 +15,8 @@ create table if not exists users (
   avatar       text default '',
   created_at   bigint not null
 );
+-- migration: เผื่อ table users ถูกสร้างไว้ก่อนเพิ่มฟีเจอร์อีเมล OTP
+alter table users add column if not exists email text;
 
 create table if not exists otps (
   phone      text primary key,

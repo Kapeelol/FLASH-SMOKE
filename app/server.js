@@ -54,6 +54,12 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_BUCKET = process.env.SUPABASE_BUCKET || 'uploads';
 const USE_SUPABASE = !!(SUPABASE_URL && SUPABASE_KEY);
 
+// อีเมล OTP ผ่าน Brevo (Sendinblue) HTTP API — ฟรี 300 อีเมล/วัน, ไม่ต้องมีโดเมน
+const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
+const MAIL_FROM = process.env.MAIL_FROM || '';
+const MAIL_FROM_NAME = process.env.MAIL_FROM_NAME || 'FLASH SMOKE';
+const EMAIL_ENABLED = !!(BREVO_API_KEY && MAIL_FROM);
+
 const ORDER_FLOW = ['received', 'preparing', 'delivering', 'completed'];
 const STATUS_LABEL = {
   received: 'ได้รับออเดอร์แล้ว', preparing: 'กำลังเตรียมสินค้า', delivering: 'กำลังจัดส่ง',
@@ -225,8 +231,8 @@ function makeSupabaseStore() {
   const enc = (v) => encodeURIComponent(v);
 
   // ---- แปลง row (snake_case จาก Postgres) <-> object (camelCase ที่ API/ฝั่งหน้าเว็บใช้) ----
-  const userOut = (r) => !r ? null : ({ id: r.id, fullname: r.fullname, phone: r.phone || '', salt: r.salt, hash: r.hash, verified: r.verified, role: r.role, lineUserId: r.line_user_id, avatar: r.avatar || '', createdAt: r.created_at });
-  const userIn = (u) => ({ id: u.id, fullname: u.fullname, phone: u.phone || null, salt: u.salt || null, hash: u.hash || null, verified: !!u.verified, role: u.role, line_user_id: u.lineUserId || null, avatar: u.avatar || '', created_at: u.createdAt });
+  const userOut = (r) => !r ? null : ({ id: r.id, fullname: r.fullname, phone: r.phone || '', email: r.email || '', salt: r.salt, hash: r.hash, verified: r.verified, role: r.role, lineUserId: r.line_user_id, avatar: r.avatar || '', createdAt: r.created_at });
+  const userIn = (u) => ({ id: u.id, fullname: u.fullname, phone: u.phone || null, email: u.email || null, salt: u.salt || null, hash: u.hash || null, verified: !!u.verified, role: u.role, line_user_id: u.lineUserId || null, avatar: u.avatar || '', created_at: u.createdAt });
   const addrOut = (r) => !r ? null : ({ id: r.id, userId: r.user_id, label: r.label, kind: r.kind, text: r.text, detail: r.detail || '', lat: r.lat, lng: r.lng, createdAt: r.created_at });
   const addrIn = (a) => ({ id: a.id, user_id: a.userId, label: a.label, kind: a.kind, text: a.text, detail: a.detail || '', lat: a.lat, lng: a.lng, created_at: a.createdAt });
   const prodOut = (r) => !r ? null : ({ id: r.id, name: r.name, desc: r.description || '', price: r.price, emoji: r.emoji, tag: r.tag || '', image: r.image, stock: r.stock });
@@ -270,6 +276,7 @@ function makeSupabaseStore() {
       const row = {};
       if (patch.fullname !== undefined) row.fullname = patch.fullname;
       if (patch.phone !== undefined) row.phone = patch.phone || null;
+      if (patch.email !== undefined) row.email = patch.email || null;
       if (patch.avatar !== undefined) row.avatar = patch.avatar;
       if (patch.verified !== undefined) row.verified = patch.verified;
       if (patch.salt !== undefined) row.salt = patch.salt;
@@ -382,6 +389,33 @@ function notifyUser(user, text) {
 }
 
 // ------------------------------------------------------------------
+// ส่ง OTP ทางอีเมล (Brevo HTTP API)
+// ------------------------------------------------------------------
+function sendOtpEmail(email, code) {
+  if (!email) return;
+  if (!EMAIL_ENABLED) { console.log('[email] (ยังไม่ตั้งค่า Brevo) OTP สำหรับ ' + email + ' = ' + code); return; }
+  const html = `<div style="font-family:'Prompt',Arial,sans-serif;max-width:440px;margin:auto;background:#0d0b15;border-radius:16px;padding:28px;color:#f2eefb">
+    <div style="font-size:22px;font-weight:700;letter-spacing:1px;color:#c4b5fd">FLASH SMOKE</div>
+    <p style="color:#b6acce;margin:14px 0 6px">รหัสยืนยันการสมัครสมาชิกของคุณคือ</p>
+    <div style="font-size:38px;font-weight:800;letter-spacing:10px;color:#fff;margin:8px 0">${code}</div>
+    <p style="color:#9a90b0;font-size:13px">รหัสนี้จะหมดอายุใน 5 นาที — หากคุณไม่ได้ทำรายการนี้ กรุณาละเว้นอีเมลฉบับนี้</p>
+  </div>`;
+  const body = JSON.stringify({
+    sender: { name: MAIL_FROM_NAME, email: MAIL_FROM },
+    to: [{ email }],
+    subject: 'รหัสยืนยัน FLASH SMOKE: ' + code,
+    htmlContent: html,
+    textContent: 'รหัสยืนยัน FLASH SMOKE ของคุณคือ ' + code + ' (หมดอายุใน 5 นาที)'
+  });
+  const req = https.request({
+    hostname: 'api.brevo.com', path: '/v3/smtp/email', method: 'POST',
+    headers: { 'api-key': BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json', 'content-length': Buffer.byteLength(body) }
+  }, (res) => { let d = ''; res.on('data', (c) => d += c); res.on('end', () => { if (res.statusCode >= 400) console.error('[email] ส่งไม่สำเร็จ', res.statusCode, d.slice(0, 250)); else console.log('[email] ส่ง OTP ไปที่ ' + email + ' แล้ว'); }); });
+  req.on('error', (e) => console.error('[email] error', e.message));
+  req.write(body); req.end();
+}
+
+// ------------------------------------------------------------------
 // SSE (live stock + settings)
 // ------------------------------------------------------------------
 const sseClients = new Set();
@@ -423,7 +457,8 @@ async function getAuthUser(req) {
 }
 function invalidateAuthCache(id) { authCache.delete(id); }
 async function requireAdmin(req) { const u = await getAuthUser(req); return u && u.role === 'admin' ? u : null; }
-const publicUser = (u) => ({ id: u.id, fullname: u.fullname, phone: u.phone || '', verified: u.verified, role: u.role || 'customer', avatar: u.avatar || '', lineLinked: !!u.lineUserId });
+const publicUser = (u) => ({ id: u.id, fullname: u.fullname, phone: u.phone || '', email: u.email || '', verified: u.verified, role: u.role || 'customer', avatar: u.avatar || '', lineLinked: !!u.lineUserId });
+const isEmail = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(s || '').trim());
 const query = (req) => new URL(req.url, 'http://x').searchParams;
 const productById = (id) => Store.products.find((p) => p.id === id);
 
@@ -438,26 +473,31 @@ const oauthStates = new Map();
 route('POST', '/api/auth/register', async (req, res, body) => {
   const fullname = String(body.fullname || '').trim();
   const phone = normPhone(body.phone);
+  const email = String(body.email || '').trim().toLowerCase();
   const password = String(body.password || '');
   if (!fullname) return send(res, 400, { error: 'กรุณากรอกชื่อ-นามสกุล' });
   if (phone.length < 9) return send(res, 400, { error: 'เบอร์โทรไม่ถูกต้อง' });
+  if (!isEmail(email)) return send(res, 400, { error: 'อีเมลไม่ถูกต้อง (ใช้รับรหัส OTP)' });
   if (password.length < 6) return send(res, 400, { error: 'รหัสผ่านอย่างน้อย 6 ตัวอักษร' });
   let user = await Store.getUserByPhone(phone);
   if (user && user.verified) return send(res, 409, { error: 'เบอร์นี้มีบัญชีอยู่แล้ว กรุณาเข้าสู่ระบบ' });
   const { salt, hash } = hashPassword(password);
-  if (!user) { user = await Store.insertUser({ id: uid('u_'), fullname, phone, salt, hash, verified: false, role: 'customer', lineUserId: null, avatar: '', createdAt: now() }); }
-  else { user = await Store.updateUser(user.id, { fullname, salt, hash }); }
+  if (!user) { user = await Store.insertUser({ id: uid('u_'), fullname, phone, email, salt, hash, verified: false, role: 'customer', lineUserId: null, avatar: '', createdAt: now() }); }
+  else { user = await Store.updateUser(user.id, { fullname, email, salt, hash }); }
   const code = gen4();
   await Store.upsertOtp({ phone, code, expiresAt: now() + 5 * 60 * 1000, tries: 0 });
-  console.log(`[OTP] ${phone} -> ${code} (สมัครสมาชิก)`);
-  send(res, 200, { ok: true, phone, devCode: DEV ? code : undefined });
+  console.log(`[OTP] ${phone} (${email}) -> ${code} (สมัครสมาชิก)`);
+  sendOtpEmail(email, code);
+  send(res, 200, { ok: true, phone, email, devCode: DEV ? code : undefined });
 });
 route('POST', '/api/auth/otp/resend', async (req, res, body) => {
   const phone = normPhone(body.phone);
-  if (!await Store.getUserByPhone(phone)) return send(res, 404, { error: 'ไม่พบเบอร์นี้ กรุณาสมัครใหม่' });
+  const user = await Store.getUserByPhone(phone);
+  if (!user) return send(res, 404, { error: 'ไม่พบเบอร์นี้ กรุณาสมัครใหม่' });
   const code = gen4();
   await Store.upsertOtp({ phone, code, expiresAt: now() + 5 * 60 * 1000, tries: 0 });
   console.log(`[OTP] ${phone} -> ${code} (ส่งอีกครั้ง)`);
+  sendOtpEmail(user.email, code);
   send(res, 200, { ok: true, phone, devCode: DEV ? code : undefined });
 });
 route('POST', '/api/auth/otp/verify', async (req, res, body) => {
@@ -483,7 +523,8 @@ route('POST', '/api/auth/login', async (req, res, body) => {
     const code = gen4();
     await Store.upsertOtp({ phone, code, expiresAt: now() + 5 * 60 * 1000, tries: 0 });
     console.log(`[OTP] ${phone} -> ${code} (login ที่ยังไม่ยืนยัน)`);
-    return send(res, 403, { error: 'ยังไม่ได้ยืนยันเบอร์', needOtp: true, phone, devCode: DEV ? code : undefined });
+    sendOtpEmail(user.email, code);
+    return send(res, 403, { error: 'ยังไม่ได้ยืนยันเบอร์', needOtp: true, phone, email: user.email, devCode: DEV ? code : undefined });
   }
   send(res, 200, { ok: true, token: sign({ uid: user.id }), user: publicUser(user) });
 });
@@ -769,6 +810,7 @@ async function main() {
     console.log('  บัญชีทดลอง:  ลูกค้า 0800000000/demo1234 · แอดมิน 0899999999/admin1234');
     console.log('  LINE Login:  ' + (LINE_LOGIN_ID && LINE_LOGIN_SECRET ? 'พร้อมใช้ (callback: ' + LINE_LOGIN_REDIRECT + ')' : 'ยังไม่ตั้งค่า (LINE_LOGIN_CHANNEL_ID/SECRET)'));
     console.log('  LINE Push:   ' + (LINE_PUSH_TOKEN ? 'พร้อมส่งจริง' : 'log-only (LINE_CHANNEL_ACCESS_TOKEN)'));
+    console.log('  Email OTP:   ' + (EMAIL_ENABLED ? 'พร้อมส่งจริง (Brevo, from ' + MAIL_FROM + ')' : 'log-only (ตั้ง BREVO_API_KEY + MAIL_FROM)'));
     console.log('');
   });
 }

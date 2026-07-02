@@ -31,9 +31,9 @@ const API = {
 // ---------------- State ----------------
 const S = {
   screen: 'welcome', user: null,
-  fullname: '', phone: '', password: '',
+  fullname: '', phone: '', email: '', password: '',
   loginPhone: '', loginPassword: '',
-  otp: ['', '', '', ''], devCode: '',
+  otp: ['', '', '', ''], devCode: '', otpEmail: '',
   pinX: 50, pinY: 46, dragging: false,
   addrDetail: '', addrLabel: 'บ้าน', mapStyle: 'violet', fromCheckout: false,
   saved: [], products: [], orders: [],
@@ -193,11 +193,14 @@ async function adminSaveSettings() {
 }
 async function doRegister() {
   if (S.busy) return;
-  const ok = S.fullname.trim() && S.phone.replace(/\D/g, '').length >= 9 && S.password.length >= 6;
-  if (!ok) return toast('กรุณากรอกข้อมูลให้ครบถ้วน');
+  const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(S.email.trim());
+  const ok = S.fullname.trim() && S.phone.replace(/\D/g, '').length >= 9 && emailOk && S.password.length >= 6;
+  if (!ok) return toast(emailOk ? 'กรุณากรอกข้อมูลให้ครบถ้วน' : 'กรุณากรอกอีเมลให้ถูกต้อง');
   S.busy = true;
-  try { const r = await API.post('/api/auth/register', { fullname: S.fullname, phone: S.phone, password: S.password }); S.devCode = r.devCode || ''; S.otp = ['', '', '', '']; S.screen = 'otp'; render(); }
-  catch (e) { toast(e.message); } finally { S.busy = false; }
+  try {
+    const r = await API.post('/api/auth/register', { fullname: S.fullname, phone: S.phone, email: S.email, password: S.password });
+    S.devCode = r.devCode || ''; S.otpEmail = r.email || S.email.trim(); S.otp = ['', '', '', '']; S.screen = 'otp'; render();
+  } catch (e) { toast(e.message); } finally { S.busy = false; }
 }
 async function verifyOtp() {
   if (S.busy) return;
@@ -210,7 +213,7 @@ async function verifyOtp() {
     setTimeout(() => { S.screen = 'home'; render(); maybeShowAd(); }, 500);
   } catch (e) { toast(e.message); } finally { S.busy = false; }
 }
-async function resendOtp() { try { const r = await API.post('/api/auth/otp/resend', { phone: S.phone }); S.devCode = r.devCode || ''; toast('ส่งรหัสใหม่แล้ว'); render(); } catch (e) { toast(e.message); } }
+async function resendOtp() { try { const r = await API.post('/api/auth/otp/resend', { phone: S.phone }); S.devCode = r.devCode || ''; if (r.email) S.otpEmail = r.email; toast('ส่งรหัสใหม่แล้ว'); render(); } catch (e) { toast(e.message); } }
 async function doLogin() {
   if (S.busy) return; S.busy = true;
   try {
@@ -218,7 +221,7 @@ async function doLogin() {
     API.setToken(r.token); S.user = r.user;
     await afterLogin();
   } catch (e) {
-    if (e.status === 403 && e.data && e.data.needOtp) { S.phone = e.data.phone; S.devCode = e.data.devCode || ''; S.otp = ['', '', '', '']; S.screen = 'otp'; render(); toast('กรุณายืนยันเบอร์โทรก่อน'); }
+    if (e.status === 403 && e.data && e.data.needOtp) { S.phone = e.data.phone; S.devCode = e.data.devCode || ''; S.otpEmail = e.data.email || ''; S.otp = ['', '', '', '']; S.screen = 'otp'; render(); toast('กรุณายืนยันอีเมลก่อน'); }
     else toast(e.message);
   } finally { S.busy = false; }
 }
@@ -294,7 +297,7 @@ function screenWelcome() {
   </div>`;
 }
 function screenRegister() {
-  const ok = S.fullname.trim() && S.phone.replace(/\D/g, '').length >= 9 && S.password.length >= 6;
+  const ok = S.fullname.trim() && S.phone.replace(/\D/g, '').length >= 9 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(S.email.trim()) && S.password.length >= 6;
   return `
   <div style="position:absolute;inset:0;background:#0d0b15;display:flex;flex-direction:column;animation:fs-fade .3s ease">
     ${topbar('สร้างบัญชีใหม่', 'goWelcome')}
@@ -308,6 +311,8 @@ function screenRegister() {
         <span style="font-size:15px;color:#9a90b0;font-weight:500;border-right:1px solid rgba(255,255,255,.12);padding-right:10px">+66</span>
         <input data-model="phone" inputmode="numeric" placeholder="08X-XXX-XXXX" style="flex:1;border:none;outline:none;font-size:15px;color:#f2eefb;background:none;height:100%">
       </div>
+      <label style="display:block;font-size:13px;font-weight:500;color:#b6acce;margin:18px 0 7px">อีเมล <span style="color:#6a6280;font-weight:400">(สำหรับรับรหัส OTP)</span></label>
+      <input data-model="email" type="email" inputmode="email" placeholder="you@example.com" style="width:100%;height:52px;border-radius:14px;border:1.5px solid rgba(255,255,255,.1);background:#1a1626;padding:0 16px;font-size:15px;color:#f2eefb;outline:none">
       <label style="display:block;font-size:13px;font-weight:500;color:#b6acce;margin:18px 0 7px">ตั้งรหัสผ่าน</label>
       <input data-model="password" type="password" placeholder="อย่างน้อย 6 ตัวอักษร" style="width:100%;height:52px;border-radius:14px;border:1.5px solid rgba(255,255,255,.1);background:#1a1626;padding:0 16px;font-size:15px;color:#f2eefb;outline:none">
       <div style="display:flex;align-items:center;gap:9px;margin-top:20px;font-size:12.5px;color:#9a90b0;line-height:1.5">
@@ -344,14 +349,14 @@ function screenLogin() {
 }
 function screenOtp() {
   const done = S.otp.join('').length === 4;
-  const hint = S.devCode ? `รหัส (โหมดทดสอบ): <span style="color:#a78bfa;font-weight:600">${esc(S.devCode)}</span>` : 'รหัสจะถูกส่งไปยังเบอร์ของคุณ';
+  const hint = S.devCode ? `รหัส (โหมดทดสอบ): <span style="color:#a78bfa;font-weight:600">${esc(S.devCode)}</span>` : 'กรุณาตรวจสอบกล่องอีเมล (รวมถึงโฟลเดอร์สแปม)';
   return `
   <div style="position:absolute;inset:0;background:#0d0b15;display:flex;flex-direction:column;animation:fs-fade .3s ease">
-    ${topbar('ยืนยันเบอร์โทร', 'goRegister')}
+    ${topbar('ยืนยันอีเมล', 'goRegister')}
     <div style="flex:1;padding:36px 26px;display:flex;flex-direction:column">
       <div style="width:64px;height:64px;border-radius:20px;background:rgba(139,92,246,.16);display:flex;align-items:center;justify-content:center;margin-bottom:22px"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="3"></rect><path d="M11 18h2"></path></svg></div>
       <div style="font-size:22px;font-weight:600;color:#f2eefb">ใส่รหัส 4 หลัก</div>
-      <div style="font-size:14px;color:#9a90b0;margin-top:6px;line-height:1.5">เราส่งรหัสไปที่เบอร์ <span style="color:#f2eefb;font-weight:500">${esc(phoneMask(S.phone))}</span><br>${hint}</div>
+      <div style="font-size:14px;color:#9a90b0;margin-top:6px;line-height:1.5">เราส่งรหัสไปที่อีเมล <span style="color:#f2eefb;font-weight:500">${esc(S.otpEmail || 'อีเมลของคุณ')}</span><br>${hint}</div>
       <div style="display:flex;gap:12px;margin-top:30px">
         ${[0, 1, 2, 3].map((i) => `<input data-otp="${i}" inputmode="numeric" maxlength="1" style="width:60px;height:68px;border-radius:16px;border:1.5px solid rgba(255,255,255,.12);background:#1a1626;text-align:center;font-size:26px;font-weight:600;color:#f2eefb;outline:none">`).join('')}
       </div>
@@ -927,6 +932,26 @@ function connectStream() {
 }
 
 // ================================================================
+// จำกัดให้ใช้บนมือถือเท่านั้น (มีลิงก์เล็ก ๆ ให้เปิดบนคอมต่อได้)
+// ================================================================
+function isMobileDevice() {
+  const ua = navigator.userAgent || '';
+  if (/Android|iPhone|iPod|iPad|IEMobile|BlackBerry|Opera Mini|Mobile|webOS/i.test(ua)) return true;
+  const coarse = window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
+  return !!coarse && Math.min(window.innerWidth, window.innerHeight) <= 820;
+}
+function showDesktopBlock() {
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0910;background-image:radial-gradient(circle at 30% 15%,#1a1526,#08070d);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:32px;color:#f2eefb;font-family:\'Prompt\',sans-serif';
+  d.innerHTML = `<img src="assets/logo.png" alt="FLASH SMOKE" style="width:230px;max-width:72%;filter:drop-shadow(0 18px 40px rgba(124,58,237,.5))">
+    <div style="font-size:21px;font-weight:700;margin-top:26px">เว็บนี้ใช้งานผ่านมือถือเท่านั้น 📱</div>
+    <div style="font-size:14px;color:#9a90b0;margin-top:10px;line-height:1.6;max-width:340px">กรุณาเปิดลิงก์นี้บนสมาร์ทโฟน<br>เพื่อสั่งพอตในตัวเมืองชุมพร</div>
+    <button id="fs-desktop-continue" style="margin-top:30px;color:#6a6280;font-size:12.5px;text-decoration:underline;text-underline-offset:3px;background:none;border:none;cursor:pointer;font-family:inherit">เข้าใช้งานบนคอมพิวเตอร์ต่อไป</button>`;
+  document.body.appendChild(d);
+  d.querySelector('#fs-desktop-continue').onclick = () => { localStorage.setItem('fs_allow_desktop', '1'); location.reload(); };
+}
+
+// ================================================================
 // Boot
 // ================================================================
 function readHash() {
@@ -937,6 +962,7 @@ function readHash() {
   return false;
 }
 async function boot() {
+  if (!isMobileDevice() && localStorage.getItem('fs_allow_desktop') !== '1') { showDesktopBlock(); return; }
   readHash();
   connectStream();
   await loadSettings();
