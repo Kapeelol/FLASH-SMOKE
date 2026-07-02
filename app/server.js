@@ -41,7 +41,15 @@ const LINE_LOGIN_REDIRECT = process.env.LINE_LOGIN_REDIRECT || ('http://localhos
 const LINE_PUSH_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
 const LINE_SHOP_TO = process.env.LINE_TO || '';
 
-const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+// รับ SUPABASE_URL ได้หลายรูปแบบ (มี/ไม่มี trailing slash, มี/ไม่มี /rest/v1 ต่อท้ายผิด ๆ) — ตัดให้เหลือแค่ base URL เสมอ
+function normalizeSupabaseUrl(raw) {
+  let u = String(raw || '').trim().replace(/\/+$/, '');
+  for (const suffix of ['/rest/v1', '/storage/v1', '/auth/v1', '/rest', '/storage']) {
+    if (u.toLowerCase().endsWith(suffix)) { u = u.slice(0, -suffix.length).replace(/\/+$/, ''); break; }
+  }
+  return u;
+}
+const SUPABASE_URL = normalizeSupabaseUrl(process.env.SUPABASE_URL);
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_BUCKET = process.env.SUPABASE_BUCKET || 'uploads';
 const USE_SUPABASE = !!(SUPABASE_URL && SUPABASE_KEY);
