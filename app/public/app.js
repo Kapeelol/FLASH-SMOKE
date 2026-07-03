@@ -318,7 +318,9 @@ function lineButton(label) {
   return `<button data-act="lineLogin" style="height:52px;border-radius:15px;background:#06C755;color:#fff;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px">
     <span style="background:#fff;color:#06C755;font-weight:800;border-radius:6px;padding:1px 7px;font-size:13px;line-height:1.4">LINE</span>${label}</button>`;
 }
-const LOGO = 'assets/logo.png';
+// v=2: bump this query string every time logo.png is replaced in-place — same filename means
+// browsers holding the 7-day image cache (see server.js serveStatic) won't refetch otherwise
+const LOGO = 'assets/logo.png?v=2';
 const BANNER = 'assets/banner.jpg';
 const bannerList = () => (S.settings.banners && S.settings.banners.length) ? S.settings.banners : [BANNER];
 // แบนเนอร์หน้าแรกแบบสไลด์รูปได้ (ไม่มีข้อความทับ)
@@ -1141,7 +1143,7 @@ function isMobileDevice() {
 function showDesktopBlock() {
   const d = document.createElement('div');
   d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0910;background-image:radial-gradient(circle at 30% 15%,#1a1526,#08070d);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:32px;color:#f2eefb;font-family:\'Prompt\',sans-serif';
-  d.innerHTML = `<img src="assets/logo.png" alt="FLASH KRATOM" style="width:230px;max-width:72%;filter:drop-shadow(0 18px 40px rgba(124,58,237,.5))">
+  d.innerHTML = `<img src="${LOGO}" alt="FLASH KRATOM" style="width:230px;max-width:72%;filter:drop-shadow(0 18px 40px rgba(124,58,237,.5))">
     <div style="font-size:21px;font-weight:700;margin-top:26px">เว็บนี้ใช้งานผ่านมือถือเท่านั้น 📱</div>
     <div style="font-size:14px;color:#9a90b0;margin-top:10px;line-height:1.6;max-width:340px">กรุณาเปิดลิงก์นี้บนสมาร์ทโฟน<br>เพื่อสั่งพอตในตัวเมืองชุมพร</div>
     <button id="fs-desktop-continue" style="margin-top:30px;color:#6a6280;font-size:12.5px;text-decoration:underline;text-underline-offset:3px;background:none;border:none;cursor:pointer;font-family:inherit">เข้าใช้งานบนคอมพิวเตอร์ต่อไป</button>`;
