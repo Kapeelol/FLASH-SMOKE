@@ -55,6 +55,7 @@ create table if not exists orders (
   user_id        text not null references users(id),
   customer_name  text default '',
   phone          text default '',
+  customer_source text default 'phone',
   items          jsonb not null default '[]',
   subtotal       int not null default 0,
   delivery_fee   int not null default 0,
@@ -72,6 +73,8 @@ create table if not exists orders (
 );
 create index if not exists orders_user_id_idx on orders(user_id);
 create index if not exists orders_created_at_idx on orders(created_at desc);
+-- migration: เผื่อ table orders ถูกสร้างไว้ก่อนเพิ่มการแยกประเภทลูกค้า (ไลน์ / สมัครสมาชิก)
+alter table orders add column if not exists customer_source text default 'phone';
 
 create table if not exists settings (
   id            int primary key default 1,

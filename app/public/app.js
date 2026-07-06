@@ -47,7 +47,7 @@ const S = {
   settings: { deliveryFee: 20, freeQty: 2 },
   cart: JSON.parse(localStorage.getItem('fs_cart') || '[]'),
   checkoutAddressId: null, payMethod: 'cod', orderNote: '',
-  adminTab: 'orders', adminOrders: [], adminOrderId: null,
+  adminTab: 'orders', adminOrders: [], adminOrderId: null, orderFilter: 'all',
   setDeliveryFee: '', setFreeQty: '',
   npName: '', npDesc: '', npPrice: '', npEmoji: '🛍️', npTag: '', npStock: '', npImageData: '', npImageName: '',
   pfName: '', pfPhone: '', pfAvatarData: '',
@@ -94,14 +94,15 @@ function showAdPopup() {
 }
 function maybeShowAd() {
   if (adShown) return;
-  if (!(S.user && S.user.role !== 'admin')) return;             // เฉพาะลูกค้า ไม่ใช่แอดมิน
+  if (!(S.user && S.user.role === 'customer')) return;          // เฉพาะลูกค้า (ไม่ใช่แอดมิน/คนส่งของ)
   if (!(S.settings && S.settings.adEnabled && S.settings.adImage)) return;
   if (localStorage.getItem('fs_ad_dismissed_date') === todayStr()) return; // ลูกค้ากด "ไม่แสดงอีกวันนี้" แล้ว
   adShown = true;
   showAdPopup();
 }
 // ---------------- Popup ยืนยันเบอร์โทร (ลูกค้าที่ล็อกอินด้วย LINE ยังไม่มีเบอร์) ----------------
-const needsPhone = () => !!(S.user && S.user.role !== 'admin' && !S.user.phone);
+const needsPhone = () => !!(S.user && S.user.role === 'customer' && !S.user.phone);
+const isStaff = () => !!(S.user && (S.user.role === 'admin' || S.user.role === 'rider'));
 function showPhonePopup(mandatory) {
   const host = document.getElementById('modal-host');
   host.innerHTML = `
@@ -419,7 +420,7 @@ async function doLogin() {
   } finally { S.busy = false; }
 }
 async function afterLogin() {
-  if (S.user.role === 'admin') { await adminLoad(); S.screen = 'admin'; }
+  if (isStaff()) { S.adminTab = 'orders'; await adminLoad(); S.screen = 'admin'; }
   else { await loadUserData(); S.screen = 'home'; }
   render();
   maybeGatePhoneOrAd();
@@ -847,7 +848,9 @@ function screenAdminOrder() {
         ${slip}
       </div>
       <div style="font-size:13px;font-weight:600;color:#f2eefb;margin:16px 0 8px">อัปเดตสถานะ</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px">${btns}</div>
+      ${o.status === 'cancelled'
+        ? `<div style="padding:12px;border-radius:12px;background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);color:#f87171;font-size:12.5px;font-weight:600;text-align:center">🔒 ออเดอร์นี้ถูกยกเลิกแล้ว — แก้ไขสถานะไม่ได้</div>`
+        : `<div style="display:flex;flex-wrap:wrap;gap:6px">${btns}</div>`}
       <div style="margin-top:16px;background:#15111f;border-radius:12px;padding:12px">${hist}</div>
     </div>
   </div>`;
@@ -874,6 +877,8 @@ function computeSales() {
   return { revenue, orders: valid.length, completed: completed.length, cancelled: orders.length - valid.length, avg: valid.length ? Math.round(revenue / valid.length) : 0, byDay, topProducts };
 }
 function screenAdmin() {
+  const rider = S.user && S.user.role === 'rider';
+  if (rider) S.adminTab = 'orders'; // คนส่งของเห็นแค่หน้าออเดอร์
   if (S.adminOrderId) return screenAdminOrder();
   const tab = S.adminTab;
   const tabBtn = (id, label) => `<button data-act="adminTab_${id}" style="flex:1;height:40px;border-radius:11px;font-size:13.5px;font-weight:600;background:${tab === id ? BTN : '#1a1626'};color:${tab === id ? '#fff' : '#9a90b0'};border:1px solid rgba(255,255,255,.06)">${label}</button>`;
@@ -970,27 +975,43 @@ function screenAdmin() {
       </div>
       <div style="font-size:14px;font-weight:600;color:#f2eefb;margin-bottom:12px">สินค้าทั้งหมด (${S.products.length})</div>${list}`;
   } else {
-    const orders = S.adminOrders;
-    const list = orders.length ? orders.map((o) => {
+    const f = S.orderFilter;
+    const filtered = S.adminOrders.filter((o) => {
+      if (f === 'cancelled') return o.status === 'cancelled';
+      if (o.status === 'cancelled') return false;            // ออเดอร์ยกเลิกไปอยู่แท็บ "ยกเลิกแล้ว" เท่านั้น
+      if (f === 'line') return o.customerSource === 'line';
+      if (f === 'phone') return o.customerSource !== 'line';
+      return true;                                           // ทั้งหมด (ที่ยังไม่ยกเลิก)
+    });
+    const chip = (id, label) => `<button data-act="orderFilter_${id}" style="padding:7px 13px;border-radius:16px;font-size:12px;font-weight:600;white-space:nowrap;background:${f === id ? BTN : '#1a1626'};color:${f === id ? '#fff' : '#9a90b0'};border:1px solid rgba(255,255,255,.08)">${label}</button>`;
+    const filters = `<div style="display:flex;gap:7px;overflow-x:auto;margin-bottom:12px;padding-bottom:2px">${chip('all', 'ทั้งหมด')}${chip('line', '🟢 ลูกค้าไลน์')}${chip('phone', '📱 สมาชิก')}${chip('cancelled', '🚫 ยกเลิกแล้ว')}</div>`;
+    const srcBadge = (o) => o.customerSource === 'line'
+      ? '<span style="font-size:10px;font-weight:700;color:#06C755;background:rgba(6,199,85,.14);padding:1px 7px;border-radius:6px">LINE</span>'
+      : '<span style="font-size:10px;font-weight:700;color:#a78bfa;background:rgba(139,92,246,.16);padding:1px 7px;border-radius:6px">สมาชิก</span>';
+    const list = filtered.length ? filtered.map((o) => {
+      const cancelled = o.status === 'cancelled';
       const btns = [...ORDER_FLOW, 'cancelled'].map((s) => `<button data-act="adminStatus" data-id="${esc(o.id)}" data-status="${s}" style="padding:6px 10px;border-radius:9px;font-size:11px;font-weight:600;background:${o.status === s ? BTN : '#0f0c18'};color:${o.status === s ? '#fff' : '#9a90b0'};border:1px solid rgba(255,255,255,.08)">${STATUS_LABEL[s]}</button>`).join('');
+      const statusRow = cancelled
+        ? `<div style="margin-top:10px;font-size:12px;color:#f87171;font-weight:600">🔒 ยกเลิกแล้ว — แก้ไขไม่ได้</div>`
+        : `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px">${btns}</div>`;
       return `<div style="background:#1a1626;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:15px;margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:14px;font-weight:600;color:#f2eefb">#${esc(String(o.id).replace(/^o_/, '').slice(0, 6).toUpperCase())} · ${esc(o.customerName || '')}</div><div style="font-size:11.5px;color:#6a6280;margin-top:2px">${esc(o.phone || 'ผู้ใช้ LINE')} · ${esc(fmtDate(o.createdAt))}</div></div><div style="font-size:15px;font-weight:700;color:#a78bfa">฿${o.total}</div></div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:14px;font-weight:600;color:#f2eefb;display:flex;align-items:center;gap:6px">#${esc(String(o.id).replace(/^o_/, '').slice(0, 6).toUpperCase())} ${srcBadge(o)}</div><div style="font-size:12px;color:#c9c2da;margin-top:3px">${esc(o.customerName || '')} · ${esc(o.phone || '-')}</div><div style="font-size:11px;color:#6a6280;margin-top:1px">${esc(fmtDate(o.createdAt))}</div></div><div style="font-size:15px;font-weight:700;color:#a78bfa">฿${o.total}</div></div>
         <div style="font-size:12.5px;color:#9a90b0;margin-top:8px">${o.items.map((i) => esc(i.name + ' x' + i.qty)).join(', ')}</div>
         <div style="font-size:11.5px;color:#6a6280;margin-top:5px">${esc(o.addressText || '-')} · ${esc(PAY_LABEL[o.payment && o.payment.method] || '')}${o.payment && o.payment.method === 'transfer' ? (o.slipImage ? ' · 🧾 มีสลิป' : ' · ⏳ รอสลิป') : ''}</div>
-        <button data-act="adminOpenOrder" data-id="${esc(o.id)}" style="width:100%;margin-top:10px;height:38px;border-radius:10px;background:rgba(139,92,246,.15);color:#c4b5fd;font-size:12.5px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px">🗺️ ดูรายละเอียด + ตำแหน่งหมุด</button>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px">${btns}</div>
+        <button data-act="adminOpenOrder" data-id="${esc(o.id)}" style="width:100%;margin-top:10px;height:38px;border-radius:10px;background:rgba(139,92,246,.15);color:#c4b5fd;font-size:12.5px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px">🗺️ ดูรายละเอียด + นำทาง</button>
+        ${statusRow}
       </div>`;
-    }).join('') : `<div style="text-align:center;color:#6a6280;font-size:14px;padding:40px 0">ยังไม่มีออเดอร์</div>`;
-    content = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-size:14px;font-weight:600;color:#f2eefb">ออเดอร์ทั้งหมด (${orders.length})</span><button data-act="adminRefresh" style="padding:0 12px;height:30px;border-radius:15px;border:1px solid rgba(255,255,255,.2);color:#c4b5fd;font-size:12px;font-weight:600">รีเฟรช</button></div>${list}`;
+    }).join('') : `<div style="text-align:center;color:#6a6280;font-size:14px;padding:40px 0">ไม่มีออเดอร์ในหมวดนี้</div>`;
+    content = `${filters}<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-size:14px;font-weight:600;color:#f2eefb">${filtered.length} ออเดอร์</span><button data-act="adminRefresh" style="padding:0 12px;height:30px;border-radius:15px;border:1px solid rgba(255,255,255,.2);color:#c4b5fd;font-size:12px;font-weight:600">รีเฟรช</button></div>${list}`;
   }
   return `
   <div style="position:absolute;inset:0;background:#0d0b15;display:flex;flex-direction:column;animation:fs-fade .3s ease">
     <div style="padding:50px 20px 18px;background:linear-gradient(135deg,#3d2b6b,#1c1630)">
       <div style="display:flex;align-items:center;justify-content:space-between">
-        <div><div style="color:#fff;font-size:19px;font-weight:700">แผงผู้ดูแลระบบ</div><div style="color:#c4b5fd;font-size:12px;margin-top:2px">FLASH KRATOM · ${esc((S.user && S.user.fullname) || '')}</div></div>
+        <div><div style="color:#fff;font-size:19px;font-weight:700">${rider ? '🛵 คนส่งของ' : 'แผงผู้ดูแลระบบ'}</div><div style="color:#c4b5fd;font-size:12px;margin-top:2px">FLASH KRATOM · ${esc((S.user && S.user.fullname) || '')}</div></div>
         <button data-act="logout" style="padding:0 14px;height:34px;border-radius:17px;border:1px solid rgba(255,255,255,.35);color:#fff;font-size:12px;font-weight:600">ออก</button>
       </div>
-      <div style="display:flex;gap:7px;margin-top:16px">${tabBtn('orders', 'ออเดอร์')}${tabBtn('products', 'สินค้า')}${tabBtn('sales', 'ยอดขาย')}</div>
+      ${rider ? '' : `<div style="display:flex;gap:7px;margin-top:16px">${tabBtn('orders', 'ออเดอร์')}${tabBtn('products', 'สินค้า')}${tabBtn('sales', 'ยอดขาย')}</div>`}
     </div>
     <div style="flex:1;overflow-y:auto;padding:18px">${content}</div>
   </div>`;
@@ -1041,6 +1062,7 @@ const ACT = {
   addAddrFromCheckout: () => { S.fromCheckout = true; go('method'); },
   pay_cod: () => { S.payMethod = 'cod'; render(); }, pay_transfer: () => { S.payMethod = 'transfer'; render(); },
   adminTab_orders: () => { S.adminTab = 'orders'; render(); }, adminTab_products: () => { S.adminTab = 'products'; render(); }, adminTab_sales: () => { S.adminTab = 'sales'; render(); },
+  orderFilter_all: () => { S.orderFilter = 'all'; render(); }, orderFilter_line: () => { S.orderFilter = 'line'; render(); }, orderFilter_phone: () => { S.orderFilter = 'phone'; render(); }, orderFilter_cancelled: () => { S.orderFilter = 'cancelled'; render(); },
   adminAddProduct, adminRefresh: async () => { await adminLoad(); render(); toast('อัปเดตแล้ว'); },
   adminDelProduct: (el) => adminDeleteProduct(el.dataset.id),
   adminStatus: (el) => adminSetStatus(el.dataset.id, el.dataset.status),
@@ -1050,16 +1072,37 @@ const ACT = {
 // ================================================================
 // Render + wiring
 // ================================================================
+// คีย์ระบุ "เนื้อหาหน้าเดียวกัน" — ถ้า render ใหม่แล้วคีย์เท่าเดิม แปลว่าเป็นหน้าเดิม เก็บ scroll ไว้ (ไม่เด้งขึ้นบนสุด)
+const renderKey = () => [S.screen, S.adminTab, S.adminOrderId || '', S.orderFilter].join('|');
+function currentScrollEl() {
+  const root = document.getElementById('screen');
+  if (!root) return null;
+  const stack = [...root.children];
+  while (stack.length) {
+    const el = stack.shift();
+    const s = getComputedStyle(el);
+    if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) return el;
+    for (const c of el.children) stack.push(c);
+  }
+  return null;
+}
+let lastRenderKey = '';
 function render() {
   // ทำลาย instance แผนที่จริงเมื่อออกจากหน้าที่ใช้มัน (กัน leak + ไม่ให้ค้างอ้างอิง DOM ที่ถูกแทนที่)
   if (leafletMap && S.screen !== 'map') { leafletMap.remove(); leafletMap = null; leafletMarker = null; leafletTile = null; poiLayer = null; poiLastKey = ''; clearTimeout(geocodeTimer); clearTimeout(poiTimer); }
   clearInterval(bannerTimer); // ตัวสไลด์แบนเนอร์ — wire() จะตั้งใหม่ถ้าอยู่หน้าแรก
   if (adminMiniMapInst && !(S.screen === 'admin' && S.adminOrderId)) { adminMiniMapInst.remove(); adminMiniMapInst = null; }
+  // จำตำแหน่ง scroll ไว้ถ้าเป็นหน้าเดิม (เช่น เพิ่มของลงตะกร้าจากหน้าเมนู หรือกดเลือกในหน้าชำระเงิน)
+  const key = renderKey();
+  const keepScroll = key === lastRenderKey;
+  const savedScroll = keepScroll ? (currentScrollEl() ? currentScrollEl().scrollTop : 0) : 0;
   const screens = { welcome: screenWelcome, register: screenRegister, login: screenLogin, otp: screenOtp, home: screenHome, method: screenMethod, map: screenMap, saved: screenSaved, profile: screenProfile, cart: screenCart, checkout: screenCheckout, orders: screenOrders, admin: screenAdmin };
   if (S.screen === 'checkout' && !S.checkoutAddressId && S.saved.length) S.checkoutAddressId = S.saved[0].id;
   $('#screen').innerHTML = (screens[S.screen] || screenWelcome)();
   $('#nav').innerHTML = S.screen === 'admin' ? '' : navBar();
   wire();
+  if (keepScroll && savedScroll) { const el = currentScrollEl(); if (el) el.scrollTop = savedScroll; }
+  lastRenderKey = key;
 }
 function wire() {
   const root = $('#screen'), nav = $('#nav');
@@ -1169,7 +1212,7 @@ async function boot() {
   if (API.token) {
     try {
       const me = await API.get('/api/me'); S.user = me.user;
-      if (me.user.role === 'admin') { await adminLoad(); S.screen = 'admin'; }
+      if (isStaff()) { S.adminTab = 'orders'; await adminLoad(); S.screen = 'admin'; }
       else { await loadUserData(); S.screen = 'home'; }
     } catch { API.setToken(''); S.screen = 'welcome'; }
   } else { await loadProducts(); }

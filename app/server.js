@@ -151,6 +151,7 @@ function makeFileStore() {
     };
     const demo = add('0800000000', 'demo1234', 'ลูกค้าทดลอง', 'customer');
     add('0899999999', 'admin1234', 'ผู้ดูแลระบบ', 'admin');
+    add('0811111111', 'rider1234', 'คนส่งของ', 'rider');
     if (demo) db.addresses.push({ id: uid('a_'), userId: demo.id, label: 'บ้าน', kind: 'home', text: '99/1 ถ.ท่าตะเภา ต.ท่าตะเภา อ.เมืองชุมพร จ.ชุมพร 86000', detail: '', lat: 46, lng: 50, createdAt: now() });
   }
   return {
@@ -237,8 +238,8 @@ function makeSupabaseStore() {
   const addrIn = (a) => ({ id: a.id, user_id: a.userId, label: a.label, kind: a.kind, text: a.text, detail: a.detail || '', lat: a.lat, lng: a.lng, created_at: a.createdAt });
   const prodOut = (r) => !r ? null : ({ id: r.id, name: r.name, desc: r.description || '', price: r.price, emoji: r.emoji, tag: r.tag || '', image: r.image, stock: r.stock });
   const prodIn = (p) => ({ id: p.id, name: p.name, description: p.desc || '', price: p.price, emoji: p.emoji, tag: p.tag || '', image: p.image, stock: p.stock, created_at: p.createdAt || now() });
-  const orderOut = (r) => !r ? null : ({ id: r.id, userId: r.user_id, customerName: r.customer_name || '', phone: r.phone || '', items: r.items || [], subtotal: r.subtotal, deliveryFee: r.delivery_fee, total: r.total, addressId: r.address_id, addressText: r.address_text, addrLat: r.addr_lat, addrLng: r.addr_lng, addrDetail: r.addr_detail || '', payment: r.payment || {}, slipImage: r.slip_image, status: r.status, statusHistory: r.status_history || [], createdAt: r.created_at });
-  const orderIn = (o) => ({ id: o.id, user_id: o.userId, customer_name: o.customerName || '', phone: o.phone || '', items: o.items, subtotal: o.subtotal, delivery_fee: o.deliveryFee, total: o.total, address_id: o.addressId, address_text: o.addressText, addr_lat: o.addrLat, addr_lng: o.addrLng, addr_detail: o.addrDetail || '', payment: o.payment, slip_image: o.slipImage, status: o.status, status_history: o.statusHistory, created_at: o.createdAt });
+  const orderOut = (r) => !r ? null : ({ id: r.id, userId: r.user_id, customerName: r.customer_name || '', phone: r.phone || '', customerSource: r.customer_source || 'phone', items: r.items || [], subtotal: r.subtotal, deliveryFee: r.delivery_fee, total: r.total, addressId: r.address_id, addressText: r.address_text, addrLat: r.addr_lat, addrLng: r.addr_lng, addrDetail: r.addr_detail || '', payment: r.payment || {}, slipImage: r.slip_image, status: r.status, statusHistory: r.status_history || [], createdAt: r.created_at });
+  const orderIn = (o) => ({ id: o.id, user_id: o.userId, customer_name: o.customerName || '', phone: o.phone || '', customer_source: o.customerSource || 'phone', items: o.items, subtotal: o.subtotal, delivery_fee: o.deliveryFee, total: o.total, address_id: o.addressId, address_text: o.addressText, addr_lat: o.addrLat, addr_lng: o.addrLng, addr_detail: o.addrDetail || '', payment: o.payment, slip_image: o.slipImage, status: o.status, status_history: o.statusHistory, created_at: o.createdAt });
   const settOut = (r) => ({ deliveryFee: r.delivery_fee, freeQty: r.free_qty, adImage: r.ad_image, adEnabled: r.ad_enabled, banners: (r.banners && r.banners.length) ? r.banners : ['assets/banner.jpg'] });
 
   async function seedAccountsAsync() {
@@ -253,6 +254,11 @@ function makeSupabaseStore() {
     if (!adminExisting) {
       const { salt, hash } = hashPassword('admin1234');
       await this.insertUser({ id: uid('u_'), fullname: 'ผู้ดูแลระบบ', phone: '0899999999', salt, hash, verified: true, role: 'admin', lineUserId: null, avatar: '', createdAt: now() });
+    }
+    const riderExisting = await this.getUserByPhone('0811111111');
+    if (!riderExisting) {
+      const { salt, hash } = hashPassword('rider1234');
+      await this.insertUser({ id: uid('u_'), fullname: 'คนส่งของ', phone: '0811111111', salt, hash, verified: true, role: 'rider', lineUserId: null, avatar: '', createdAt: now() });
     }
   }
 
@@ -458,6 +464,8 @@ async function getAuthUser(req) {
 }
 function invalidateAuthCache(id) { authCache.delete(id); }
 async function requireAdmin(req) { const u = await getAuthUser(req); return u && u.role === 'admin' ? u : null; }
+// พนักงาน = แอดมิน หรือ คนส่งของ (rider) — เห็นหน้าออเดอร์ + อัปเดตสถานะได้
+async function requireStaff(req) { const u = await getAuthUser(req); return u && (u.role === 'admin' || u.role === 'rider') ? u : null; }
 const publicUser = (u) => ({ id: u.id, fullname: u.fullname, phone: u.phone || '', email: u.email || '', verified: u.verified, role: u.role || 'customer', avatar: u.avatar || '', lineLinked: !!u.lineUserId });
 const isEmail = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(s || '').trim());
 const query = (req) => new URL(req.url, 'http://x').searchParams;
@@ -771,6 +779,7 @@ route('POST', '/api/orders', async (req, res, body) => {
   const payMethod = ['cod', 'transfer'].includes(body.payment && body.payment.method) ? body.payment.method : 'cod';
   const order = {
     id: uid('o_'), userId: u.id, customerName: u.fullname, phone: u.phone || '',
+    customerSource: u.lineUserId ? 'line' : 'phone', // ลูกค้ามาจากไลน์ หรือ สมัครสมาชิก(เบอร์)
     items: detailed, subtotal, deliveryFee, total: subtotal + deliveryFee,
     addressId: addr ? addr.id : null, addressText: addr ? addr.text : (body.addressText || null),
     addrLat: addr ? addr.lat : null, addrLng: addr ? addr.lng : null, addrDetail: addr ? addr.detail : '',
@@ -800,15 +809,16 @@ route('POST', '/api/orders/slip', async (req, res, body) => {
   send(res, 200, { ok: true, order: updated });
 });
 
-// ---- Admin ----
+// ---- Admin / Staff (แอดมิน + คนส่งของ เห็นออเดอร์ได้) ----
 route('GET', '/api/admin/orders', async (req, res) => {
-  if (!await requireAdmin(req)) return send(res, 403, { error: 'เฉพาะผู้ดูแลระบบ' });
+  if (!await requireStaff(req)) return send(res, 403, { error: 'เฉพาะพนักงาน' });
   send(res, 200, { orders: await Store.getAllOrders() });
 });
 route('POST', '/api/admin/orders/status', async (req, res, body) => {
-  if (!await requireAdmin(req)) return send(res, 403, { error: 'เฉพาะผู้ดูแลระบบ' });
+  if (!await requireStaff(req)) return send(res, 403, { error: 'เฉพาะพนักงาน' });
   const order = await Store.getOrderById(body.id);
   if (!order) return send(res, 404, { error: 'ไม่พบออเดอร์' });
+  if (order.status === 'cancelled') return send(res, 409, { error: 'ออเดอร์นี้ถูกยกเลิกแล้ว แก้ไขไม่ได้' });
   if (!STATUS_LABEL[body.status]) return send(res, 400, { error: 'สถานะไม่ถูกต้อง' });
   const history = [...(order.statusHistory || []), { status: body.status, at: now() }];
   const updated = await Store.updateOrder(order.id, { status: body.status, statusHistory: history });
@@ -934,7 +944,7 @@ async function main() {
     console.log('  เปิดเว็บที่:  http://localhost:' + PORT);
     console.log('  โหมด:        ' + (DEV ? 'development (โชว์รหัส OTP)' : 'production'));
     console.log('  ที่เก็บข้อมูล: ' + (USE_SUPABASE ? 'Supabase (' + SUPABASE_URL + ')' : 'ไฟล์ในเครื่อง (db.json) — ตั้ง SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY เพื่อใช้ Supabase'));
-    console.log('  บัญชีทดลอง:  ลูกค้า 0800000000/demo1234 · แอดมิน 0899999999/admin1234');
+    console.log('  บัญชีทดลอง:  ลูกค้า 0800000000/demo1234 · แอดมิน 0899999999/admin1234 · คนส่งของ 0811111111/rider1234');
     console.log('  LINE Login:  ' + (LINE_LOGIN_ID && LINE_LOGIN_SECRET ? 'พร้อมใช้ (callback: ' + LINE_LOGIN_REDIRECT + ')' : 'ยังไม่ตั้งค่า (LINE_LOGIN_CHANNEL_ID/SECRET)'));
     console.log('  LINE Push:   ' + (LINE_PUSH_TOKEN ? 'พร้อมส่งจริง' : 'log-only (LINE_CHANNEL_ACCESS_TOKEN)'));
     console.log('  Email OTP:   ' + (EMAIL_ENABLED ? 'พร้อมส่งจริง (Brevo, from ' + MAIL_FROM + ')' : 'log-only (ตั้ง BREVO_API_KEY + MAIL_FROM)'));
