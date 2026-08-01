@@ -299,8 +299,13 @@ function makeSupabaseStore() {
       Store.products = rows.map(prodOut);
       const s = await sb('GET', '/rest/v1/settings?id=eq.1&select=*');
       Store.settings = s && s[0] ? settOut(s[0]) : defaultSettings();
-      const rw = await sb('GET', '/rest/v1/rewards?select=id&limit=1');
-      if (!rw.length) { await sb('POST', '/rest/v1/rewards', seedRewards().map(rewardIn), { Prefer: 'return=minimal' }); }
+      // ตาราง rewards อาจยังไม่ถูกสร้าง (ยังไม่ได้รัน schema.sql) — ห้ามให้ทั้งร้านล่มเพราะเรื่องนี้
+      try {
+        const rw = await sb('GET', '/rest/v1/rewards?select=id&limit=1');
+        if (!rw.length) await sb('POST', '/rest/v1/rewards', seedRewards().map(rewardIn), { Prefer: 'return=minimal' });
+      } catch (e) {
+        console.warn('⚠️  ข้ามการเตรียมตาราง rewards — ระบบแลกแต้มจะยังไม่ทำงานจนกว่าจะรัน supabase/schema.sql:', e.message);
+      }
       await seedAccountsAsync.call(this);
     },
     async getUserByPhone(phone) { const r = await sb('GET', '/rest/v1/users?phone=eq.' + enc(phone) + '&select=*&limit=1'); return userOut(r[0]); },
