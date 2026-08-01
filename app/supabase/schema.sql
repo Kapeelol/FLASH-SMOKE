@@ -13,10 +13,14 @@ create table if not exists users (
   role         text not null default 'customer',
   line_user_id text unique,
   avatar       text default '',
+  points       int not null default 0,
+  approved     boolean not null default true,
   created_at   bigint not null
 );
--- migration: เผื่อ table users ถูกสร้างไว้ก่อนเพิ่มฟีเจอร์อีเมล OTP
+-- migration: เผื่อ table users ถูกสร้างไว้ก่อนเพิ่มฟีเจอร์อีเมล OTP / แต้มสะสม / อนุมัติคนส่งของ
 alter table users add column if not exists email text;
+alter table users add column if not exists points int not null default 0;
+alter table users add column if not exists approved boolean not null default true;
 
 create table if not exists otps (
   phone      text primary key,
@@ -69,12 +73,38 @@ create table if not exists orders (
   slip_image     text,
   status         text not null default 'received',
   status_history jsonb not null default '[]',
+  points_earned  int not null default 0,
   created_at     bigint not null
 );
 create index if not exists orders_user_id_idx on orders(user_id);
 create index if not exists orders_created_at_idx on orders(created_at desc);
--- migration: เผื่อ table orders ถูกสร้างไว้ก่อนเพิ่มการแยกประเภทลูกค้า (ไลน์ / สมัครสมาชิก)
+-- migration: เผื่อ table orders ถูกสร้างไว้ก่อนเพิ่มการแยกประเภทลูกค้า / แต้มสะสม
 alter table orders add column if not exists customer_source text default 'phone';
+alter table orders add column if not exists points_earned int not null default 0;
+
+-- ของรางวัลสำหรับแลกแต้ม + ประวัติการแลก
+create table if not exists rewards (
+  id          text primary key,
+  name        text not null,
+  description text default '',
+  points_cost int not null default 0,
+  emoji       text default '🎁',
+  image       text,
+  stock       int not null default 0,
+  created_at  bigint not null
+);
+create table if not exists redemptions (
+  id            text primary key,
+  user_id       text not null references users(id),
+  customer_name text default '',
+  phone         text default '',
+  reward_id     text,
+  reward_name   text,
+  points_cost   int not null default 0,
+  status        text not null default 'pending',
+  created_at    bigint not null
+);
+create index if not exists redemptions_user_id_idx on redemptions(user_id);
 
 create table if not exists settings (
   id            int primary key default 1,
@@ -96,6 +126,8 @@ alter table addresses enable row level security;
 alter table products enable row level security;
 alter table orders enable row level security;
 alter table settings enable row level security;
+alter table rewards enable row level security;
+alter table redemptions enable row level security;
 
 -- Storage bucket สำหรับรูปภาพ (สินค้า/สลิป/โฆษณา/รูปโปรไฟล์) — ตั้งเป็น public เพื่อให้โหลดรูปแสดงผลได้
 -- (เขียนรูปเข้าไปได้เฉพาะ backend ที่ถือ service_role key เท่านั้น — public ที่นี่หมายถึง "อ่านได้" ไม่ใช่ "เขียนได้")

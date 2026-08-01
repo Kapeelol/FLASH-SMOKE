@@ -44,12 +44,16 @@ const S = {
   pinLat: null, pinLng: null, currentAddr: '', addrLoading: false, wantsGeoLocate: false, geoTried: false,
   houseNo: '', addrDetail: '', addrLabel: 'บ้าน', mapStyle: 'violet', fromCheckout: false,
   saved: [], products: [], orders: [],
+  rewards: [], myRedemptions: [],
   settings: { deliveryFee: 20, freeQty: 2 },
   cart: JSON.parse(localStorage.getItem('fs_cart') || '[]'),
   checkoutAddressId: null, payMethod: 'cod', orderNote: '',
   adminTab: 'orders', adminOrders: [], adminOrderId: null, orderFilter: 'all',
+  adminRedemptions: [], adminRiders: [],
   setDeliveryFee: '', setFreeQty: '',
   npName: '', npDesc: '', npPrice: '', npEmoji: '🛍️', npTag: '', npStock: '', npImageData: '', npImageName: '',
+  nrName: '', nrDesc: '', nrCost: '', nrEmoji: '🎁', nrStock: '', nrImageData: '', nrImageName: '',
+  rrName: '', rrPhone: '', rrPassword: '',
   pfName: '', pfPhone: '', pfAvatarData: '',
   toast: '', busy: false
 };
@@ -99,6 +103,44 @@ function maybeShowAd() {
   if (localStorage.getItem('fs_ad_dismissed_date') === todayStr()) return; // ลูกค้ากด "ไม่แสดงอีกวันนี้" แล้ว
   adShown = true;
   showAdPopup();
+}
+// ---------------- เมนูขีดสามขีด (ลูกค้า) ----------------
+function closeMenu() { const h = document.getElementById('modal-host'); if (h) h.innerHTML = ''; }
+function showMenuDrawer() {
+  const host = document.getElementById('modal-host');
+  const name = (S.user && S.user.fullname) || 'ลูกค้า';
+  const pts = (S.user && S.user.points) || 0;
+  const item = (act, icon, label) => `<button data-menu="${act}" style="width:100%;display:flex;align-items:center;gap:14px;padding:15px 18px;background:none;border:none;color:#f2eefb;font-size:15px;font-weight:500;font-family:inherit;text-align:left;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer"><span style="font-size:20px;width:24px;text-align:center">${icon}</span>${label}</button>`;
+  host.innerHTML = `
+  <div class="menu-backdrop" style="position:absolute;inset:0;z-index:90;background:rgba(5,4,9,.6);animation:fs-fade .2s ease">
+    <div class="menu-panel" style="position:absolute;top:0;right:0;bottom:0;width:78%;max-width:300px;background:#161221;box-shadow:-12px 0 40px rgba(0,0,0,.5);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s ease">
+      <div style="padding:38px 18px 18px;background:linear-gradient(135deg,#3d2b6b,#1c1630)">
+        <div style="font-size:16px;font-weight:700;color:#fff">${esc(name)}</div>
+        <div style="display:inline-flex;align-items:center;gap:6px;margin-top:10px;background:rgba(255,255,255,.12);border-radius:12px;padding:6px 12px"><span style="font-size:16px">⭐</span><span style="color:#fff;font-weight:700;font-size:15px">${pts}</span><span style="color:rgba(255,255,255,.8);font-size:12px">แต้ม</span></div>
+      </div>
+      <div style="flex:1;overflow-y:auto">
+        ${item('rewards', '🎁', 'แลกของรางวัล')}
+        ${item('profile', '👤', 'โปรไฟล์ของฉัน')}
+        ${item('orders', '🧾', 'ออเดอร์ของฉัน')}
+        ${item('addresses', '📍', 'ที่อยู่จัดส่ง')}
+      </div>
+      <button data-menu="logout" style="margin:16px;height:48px;border-radius:14px;background:rgba(248,113,113,.14);color:#f87171;font-size:15px;font-weight:600;border:none;cursor:pointer">ออกจากระบบ</button>
+    </div>
+  </div>`;
+  const bd = host.querySelector('.menu-backdrop');
+  const panel = host.querySelector('.menu-panel');
+  requestAnimationFrame(() => { panel.style.transform = 'translateX(0)'; });
+  bd.onclick = (e) => { if (e.target === bd) closeMenu(); };
+  host.querySelectorAll('[data-menu]').forEach((el) => {
+    el.onclick = () => {
+      const act = el.dataset.menu; closeMenu();
+      if (act === 'logout') ACT.logout();
+      else if (act === 'rewards') go('rewards');
+      else if (act === 'profile') ACT.goProfile();
+      else if (act === 'orders') go('orders');
+      else if (act === 'addresses') go('saved');
+    };
+  });
 }
 // ---------------- Popup ยืนยันเบอร์โทร (ลูกค้าที่ล็อกอินด้วย LINE ยังไม่มีเบอร์) ----------------
 const needsPhone = () => !!(S.user && S.user.role === 'customer' && !S.user.phone);
@@ -350,10 +392,12 @@ function setBanner(idx) {
 // ================================================================
 async function loadUserData() {
   try {
-    const [a, p, o] = await Promise.all([API.get('/api/addresses'), API.get('/api/products'), API.get('/api/orders')]);
+    const [a, p, o, rw, rd] = await Promise.all([API.get('/api/addresses'), API.get('/api/products'), API.get('/api/orders'), API.get('/api/rewards'), API.get('/api/redemptions')]);
     S.saved = a.addresses || []; S.products = p.products || []; S.orders = o.orders || [];
+    S.rewards = rw.rewards || []; S.myRedemptions = rd.redemptions || [];
   } catch {}
 }
+async function loadRewards() { try { const [rw, rd, me] = await Promise.all([API.get('/api/rewards'), API.get('/api/redemptions'), API.get('/api/me')]); S.rewards = rw.rewards || []; S.myRedemptions = rd.redemptions || []; if (me.user) S.user = me.user; } catch {} }
 async function loadProducts() { try { const p = await API.get('/api/products'); S.products = p.products || []; } catch {} }
 async function loadSettings() { try { const s = await API.get('/api/settings'); if (s.settings) S.settings = s.settings; } catch {} }
 async function saveProfile() {
@@ -396,6 +440,41 @@ async function doRegister() {
     S.devCode = r.devCode || ''; S.otpEmail = r.email || S.email.trim(); S.otp = ['', '', '', '']; S.screen = 'otp'; render();
   } catch (e) { toast(e.message); } finally { S.busy = false; }
 }
+async function doRiderRegister() {
+  if (S.busy) return;
+  if (!S.rrName.trim() || S.rrPhone.replace(/\D/g, '').length < 9 || S.rrPassword.length < 6) return toast('กรุณากรอกข้อมูลให้ครบถ้วน (รหัสผ่าน ≥ 6 ตัว)');
+  S.busy = true;
+  try {
+    const r = await API.post('/api/auth/rider/register', { fullname: S.rrName, phone: S.rrPhone, password: S.rrPassword });
+    API.setToken(r.token); S.user = r.user;
+    S.rrName = ''; S.rrPhone = ''; S.rrPassword = '';
+    S.screen = 'riderPending'; render();
+  } catch (e) { toast(e.message); } finally { S.busy = false; }
+}
+async function redeemReward(id) {
+  if (S.busy) return; S.busy = true;
+  try {
+    const r = await API.post('/api/rewards/redeem', { rewardId: id });
+    if (S.user) S.user.points = r.points;
+    await loadRewards();
+    render(); toast('แลกของรางวัลสำเร็จ 🎉 ทางร้านจะติดต่อ/จัดส่งให้');
+  } catch (e) { toast(e.message); } finally { S.busy = false; }
+}
+async function adminAddReward() {
+  if (S.busy) return;
+  if (!S.nrName.trim()) return toast('กรอกชื่อของรางวัล');
+  if (!(Number(S.nrCost) >= 1)) return toast('กรอกแต้มที่ใช้แลก');
+  S.busy = true;
+  try {
+    await API.post('/api/admin/rewards', { name: S.nrName, desc: S.nrDesc, pointsCost: Number(S.nrCost), emoji: S.nrEmoji, stock: Number(S.nrStock) || 0, imageData: S.nrImageData || undefined });
+    S.nrName = ''; S.nrDesc = ''; S.nrCost = ''; S.nrEmoji = '🎁'; S.nrStock = ''; S.nrImageData = ''; S.nrImageName = '';
+    await adminLoad(); render(); toast('เพิ่มของรางวัลแล้ว ✓');
+  } catch (e) { toast(e.message); } finally { S.busy = false; }
+}
+async function adminDeleteReward(id) { try { await API.del('/api/admin/rewards', { id }); await adminLoad(); render(); toast('ลบของรางวัลแล้ว'); } catch (e) { toast(e.message); } }
+async function adminSetRedemption(id, status) { try { await API.post('/api/admin/redemptions/status', { id, status }); await adminLoad(); render(); toast('อัปเดตแล้ว'); } catch (e) { toast(e.message); } }
+async function adminApproveRider(id) { try { await API.post('/api/admin/riders/approve', { id }); await adminLoad(); render(); toast('อนุมัติคนส่งของแล้ว ✓'); } catch (e) { toast(e.message); } }
+async function adminRejectRider(id) { try { await API.post('/api/admin/riders/reject', { id }); await adminLoad(); render(); toast('ระงับคนส่งของแล้ว'); } catch (e) { toast(e.message); } }
 async function verifyOtp() {
   if (S.busy) return;
   if (S.otp.join('').length !== 4) return toast('กรอกรหัสให้ครบ 4 หลัก');
@@ -420,6 +499,7 @@ async function doLogin() {
   } finally { S.busy = false; }
 }
 async function afterLogin() {
+  if (S.user && S.user.role === 'rider' && !S.user.approved) { S.screen = 'riderPending'; render(); return; }
   if (isStaff()) { S.adminTab = 'orders'; await adminLoad(); S.screen = 'admin'; }
   else { await loadUserData(); S.screen = 'home'; }
   render();
@@ -467,7 +547,15 @@ async function placeOrder() {
 }
 async function refreshOrders() { await loadUserData(); render(); toast('อัปเดตแล้ว'); }
 // admin
-async function adminLoad() { try { const [o, p] = await Promise.all([API.get('/api/admin/orders'), API.get('/api/products')]); S.adminOrders = o.orders || []; S.products = p.products || []; } catch (e) { toast(e.message); } }
+async function adminLoad() {
+  try {
+    const jobs = [API.get('/api/admin/orders'), API.get('/api/products'), API.get('/api/rewards'), API.get('/api/admin/redemptions')];
+    if (S.user && S.user.role === 'admin') jobs.push(API.get('/api/admin/riders'));
+    const [o, p, rw, rd, ri] = await Promise.all(jobs);
+    S.adminOrders = o.orders || []; S.products = p.products || []; S.rewards = rw.rewards || []; S.adminRedemptions = rd.redemptions || [];
+    S.adminRiders = ri ? (ri.riders || []) : [];
+  } catch (e) { toast(e.message); }
+}
 async function adminAddProduct() {
   if (S.busy) return;
   if (!S.npName.trim()) return toast('กรอกชื่อสินค้า');
@@ -503,6 +591,7 @@ function screenWelcome() {
       <button data-act="goRegister" style="height:54px;border-radius:16px;background:${BTN};color:#fff;font-size:16px;font-weight:600;box-shadow:0 16px 30px -12px rgba(124,58,237,.9)">สมัครสมาชิก</button>
       ${lineButton('เข้าสู่ระบบด้วย LINE')}
       <button data-act="goLogin" style="height:44px;color:#b6acce;font-size:14px;font-weight:500;text-decoration:underline;text-underline-offset:3px">เข้าสู่ระบบด้วยเบอร์โทร</button>
+      <button data-act="goRiderRegister" style="height:40px;color:#8b80a8;font-size:13px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:6px">🛵 สมัครเป็นคนส่งของ</button>
     </div>
   </div>`;
 }
@@ -601,13 +690,13 @@ function screenHome() {
     <div style="padding:46px 20px 46px;background:linear-gradient(135deg,#3d2b6b,#1c1630);border-radius:0 0 26px 26px">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <img src="${LOGO}" alt="FLASH KRATOM" style="height:44px;filter:drop-shadow(0 4px 10px rgba(0,0,0,.4))">
-        <button data-act="logout" style="padding:0 14px;height:34px;border-radius:17px;border:1px solid rgba(255,255,255,.35);color:#fff;font-size:12px;font-weight:600">ออกจากระบบ</button>
+        <button data-act="openMenu" aria-label="เมนู" style="width:42px;height:42px;border-radius:13px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px"><span style="width:18px;height:2px;background:#fff;border-radius:2px"></span><span style="width:18px;height:2px;background:#fff;border-radius:2px"></span><span style="width:18px;height:2px;background:#fff;border-radius:2px"></span></button>
       </div>
     </div>
-    <button data-act="goProfile" style="width:calc(100% - 32px);text-align:left;margin:-30px 16px 0;background:#1a1626;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px 16px;display:flex;align-items:center;gap:12px">
+    <button data-act="goRewards" style="width:calc(100% - 32px);text-align:left;margin:-30px 16px 0;background:#1a1626;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px 16px;display:flex;align-items:center;gap:12px">
       ${avatar}
-      <div style="line-height:1.3;flex:1"><div style="font-size:12px;color:#9a90b0">สวัสดี · แตะเพื่อแก้ไขโปรไฟล์</div><div style="font-size:15px;font-weight:600;color:#f2eefb">${esc(name)}</div></div>
-      <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:#a78bfa;font-weight:500">${IC.pin('#a78bfa')}ชุมพร</div>
+      <div style="line-height:1.3;flex:1"><div style="font-size:12px;color:#9a90b0">สวัสดี</div><div style="font-size:15px;font-weight:600;color:#f2eefb">${esc(name)}</div></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px"><div style="display:flex;align-items:center;gap:4px;font-size:14px;color:#fbbf24;font-weight:700">⭐ ${(S.user && S.user.points) || 0}</div><div style="font-size:10px;color:#9a90b0">แต้ม · แตะแลกของ</div></div>
     </button>
     ${bannerCarousel()}
     <div style="padding:20px 16px 8px;font-size:16px;font-weight:600;color:#f2eefb">เมนูแนะนำ</div>
@@ -717,6 +806,65 @@ function screenProfile() {
     <div style="padding:12px 22px 24px">
       <button data-act="saveProfile" style="width:100%;height:54px;border-radius:16px;background:${BTN};color:#fff;font-size:16px;font-weight:600;box-shadow:0 14px 26px -14px rgba(124,58,237,.9)">บันทึกโปรไฟล์</button>
     </div>
+  </div>`;
+}
+function screenRewards() {
+  const pts = (S.user && S.user.points) || 0;
+  const redLabel = { pending: '⏳ รอจัดส่ง', delivered: '✓ ได้รับแล้ว', cancelled: '✕ ยกเลิก' };
+  const rewardCard = (rw) => {
+    const canAfford = pts >= rw.pointsCost;
+    const out = (rw.stock || 0) <= 0;
+    return `<div style="background:#1a1626;border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:14px;display:flex;align-items:center;gap:13px;margin-bottom:12px">
+      <div style="width:56px;height:56px;border-radius:14px;overflow:hidden;flex:none">${rw.image ? `<img src="${esc(rw.image)}" style="width:100%;height:100%;object-fit:cover">` : `<div style="width:100%;height:100%;background:rgba(139,92,246,.12);display:flex;align-items:center;justify-content:center;font-size:28px">${esc(rw.emoji || '🎁')}</div>`}</div>
+      <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#f2eefb">${esc(rw.name)}</div><div style="font-size:12px;color:#9a90b0">${esc(rw.desc || '')}</div><div style="font-size:13px;font-weight:700;color:#fbbf24;margin-top:4px">⭐ ${rw.pointsCost} แต้ม${out ? ' · หมดแล้ว' : ''}</div></div>
+      ${out ? `<span style="padding:9px 14px;border-radius:11px;background:#241f33;color:#6a6280;font-size:12.5px;font-weight:600">หมด</span>`
+            : `<button data-act="redeem" data-id="${esc(rw.id)}" ${canAfford ? '' : 'disabled'} style="padding:9px 16px;border-radius:11px;background:${canAfford ? BTN : '#2a2440'};color:${canAfford ? '#fff' : '#6a6280'};font-size:12.5px;font-weight:600">แลก</button>`}
+    </div>`;
+  };
+  const rewardList = S.rewards.length ? S.rewards.map(rewardCard).join('') : `<div style="text-align:center;color:#6a6280;font-size:13px;padding:24px 0">ยังไม่มีของรางวัล</div>`;
+  const myList = S.myRedemptions.length ? S.myRedemptions.map((r) => `<div style="display:flex;justify-content:space-between;align-items:center;background:#1a1626;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 14px;margin-bottom:8px"><div><div style="font-size:13.5px;font-weight:600;color:#f2eefb">${esc(r.rewardName)}</div><div style="font-size:11px;color:#6a6280;margin-top:2px">${esc(fmtDate(r.createdAt))} · -${r.pointsCost} แต้ม</div></div><span style="font-size:12px;font-weight:600;color:${r.status === 'delivered' ? '#34d399' : r.status === 'cancelled' ? '#f87171' : '#fbbf24'}">${redLabel[r.status] || r.status}</span></div>`).join('') : '';
+  return `
+  <div style="position:absolute;inset:0;bottom:76px;overflow-y:auto;background:#0d0b15;animation:fs-fade .3s ease">
+    ${topbar('แลกของรางวัล', 'goHome')}
+    <div style="margin:16px;background:linear-gradient(135deg,#2a1f52,#7c3aed);border-radius:18px;padding:20px;text-align:center">
+      <div style="font-size:13px;color:rgba(255,255,255,.85)">แต้มสะสมของคุณ</div>
+      <div style="font-size:40px;font-weight:800;color:#fff;margin-top:2px">⭐ ${pts}</div>
+      <div style="font-size:11.5px;color:rgba(255,255,255,.75);margin-top:4px">ทุกการสั่งซื้อ 10 บาท = 1 แต้ม</div>
+    </div>
+    <div style="padding:4px 16px 8px;font-size:16px;font-weight:600;color:#f2eefb">ของรางวัล</div>
+    <div style="padding:0 16px">${rewardList}</div>
+    ${myList ? `<div style="padding:16px 16px 8px;font-size:15px;font-weight:600;color:#f2eefb">ประวัติการแลก</div><div style="padding:0 16px 20px">${myList}</div>` : ''}
+  </div>`;
+}
+function screenRiderRegister() {
+  return `
+  <div style="position:absolute;inset:0;background:#0d0b15;display:flex;flex-direction:column;animation:fs-fade .3s ease">
+    ${topbar('สมัครเป็นคนส่งของ', 'goWelcome')}
+    <div style="flex:1;overflow-y:auto;padding:26px 22px">
+      <div style="font-size:44px;text-align:center">🛵</div>
+      <div style="font-size:20px;font-weight:700;color:#f2eefb;text-align:center;margin-top:6px">ร่วมเป็นคนส่งของกับเรา</div>
+      <div style="font-size:13px;color:#9a90b0;text-align:center;margin-top:6px;line-height:1.5">กรอกข้อมูลเพื่อสมัคร — ทางร้านจะตรวจสอบและอนุมัติก่อนเริ่มงาน</div>
+      <label style="display:block;font-size:13px;font-weight:500;color:#b6acce;margin:22px 0 7px">ชื่อ - นามสกุล</label>
+      <input data-model="rrName" placeholder="กรอกชื่อ - นามสกุล" style="width:100%;height:52px;border-radius:14px;border:1.5px solid rgba(255,255,255,.1);background:#1a1626;padding:0 16px;font-size:15px;color:#f2eefb;outline:none">
+      <label style="display:block;font-size:13px;font-weight:500;color:#b6acce;margin:18px 0 7px">เบอร์โทรศัพท์</label>
+      <div style="display:flex;align-items:center;height:52px;border-radius:14px;border:1.5px solid rgba(255,255,255,.1);background:#1a1626;padding:0 16px;gap:10px"><span style="font-size:15px;color:#9a90b0;font-weight:500;border-right:1px solid rgba(255,255,255,.12);padding-right:10px">+66</span><input data-model="rrPhone" inputmode="numeric" placeholder="08X-XXX-XXXX" style="flex:1;border:none;outline:none;font-size:15px;color:#f2eefb;background:none;height:100%"></div>
+      <label style="display:block;font-size:13px;font-weight:500;color:#b6acce;margin:18px 0 7px">ตั้งรหัสผ่าน</label>
+      <input data-model="rrPassword" type="password" placeholder="อย่างน้อย 6 ตัวอักษร" style="width:100%;height:52px;border-radius:14px;border:1.5px solid rgba(255,255,255,.1);background:#1a1626;padding:0 16px;font-size:15px;color:#f2eefb;outline:none">
+    </div>
+    <div style="padding:12px 22px 30px"><button data-act="doRiderRegister" style="width:100%;height:54px;border-radius:16px;background:${BTN};color:#fff;font-size:16px;font-weight:600">ส่งใบสมัคร</button></div>
+  </div>`;
+}
+function screenRiderPending() {
+  const approved = S.user && S.user.approved;
+  return `
+  <div style="position:absolute;inset:0;background:#0d0b15;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px;animation:fs-fade .3s ease">
+    <div style="font-size:64px">${approved ? '✅' : '⏳'}</div>
+    <div style="font-size:20px;font-weight:700;color:#f2eefb;margin-top:18px">${approved ? 'ได้รับอนุมัติแล้ว' : 'บัญชีอยู่ระหว่างรออนุมัติ'}</div>
+    <div style="font-size:14px;color:#9a90b0;margin-top:10px;line-height:1.6;max-width:300px">${approved ? 'บัญชีคนส่งของของคุณพร้อมใช้งานแล้ว' : 'ทางร้านกำลังตรวจสอบใบสมัครของคุณ เมื่ออนุมัติแล้วจะเข้าใช้งานหน้าออเดอร์ได้ทันที'}</div>
+    ${approved
+      ? `<button data-act="riderEnter" style="margin-top:26px;height:50px;padding:0 28px;border-radius:14px;background:${BTN};color:#fff;font-size:15px;font-weight:600">เข้าหน้าออเดอร์</button>`
+      : `<button data-act="riderRefresh" style="margin-top:26px;height:46px;padding:0 24px;border-radius:14px;background:#1a1626;border:1px solid rgba(255,255,255,.12);color:#c4b5fd;font-size:14px;font-weight:600">ตรวจสอบสถานะอีกครั้ง</button>`}
+    <button data-act="logout" style="margin-top:12px;color:#6a6280;font-size:13px;background:none;border:none;cursor:pointer">ออกจากระบบ</button>
   </div>`;
 }
 function screenCart() {
@@ -974,6 +1122,61 @@ function screenAdmin() {
         <button data-act="adminAddProduct" style="width:100%;height:48px;border-radius:12px;background:${BTN};color:#fff;font-size:15px;font-weight:600;margin-top:12px">บันทึกสินค้า</button>
       </div>
       <div style="font-size:14px;font-weight:600;color:#f2eefb;margin-bottom:12px">สินค้าทั้งหมด (${S.products.length})</div>${list}`;
+  } else if (tab === 'rewards') {
+    const isAdmin = S.user && S.user.role === 'admin';
+    // คำขอสมัครเป็นคนส่งของ (รออนุมัติ)
+    const riders = S.adminRiders || [];
+    const pendingRiders = riders.filter((r) => !r.approved);
+    const approvedRiders = riders.filter((r) => r.approved);
+    const riderCard = (r, pending) => `<div style="display:flex;align-items:center;gap:10px;background:#1a1626;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 13px;margin-bottom:8px">
+      <div style="width:38px;height:38px;border-radius:10px;background:rgba(139,92,246,.14);display:flex;align-items:center;justify-content:center;font-size:18px;flex:none">🛵</div>
+      <div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:600;color:#f2eefb">${esc(r.fullname || 'คนส่งของ')}</div><div style="font-size:12px;color:#9a90b0">${esc(r.phone || '-')}</div></div>
+      ${pending
+        ? `<div style="display:flex;gap:6px"><button data-act="adminApproveRider" data-id="${esc(r.id)}" style="padding:8px 12px;border-radius:10px;background:rgba(52,211,153,.16);color:#34d399;font-size:12px;font-weight:600">อนุมัติ</button><button data-act="adminRejectRider" data-id="${esc(r.id)}" style="padding:8px 12px;border-radius:10px;background:rgba(248,113,113,.14);color:#f87171;font-size:12px;font-weight:600">ปฏิเสธ</button></div>`
+        : `<div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;font-weight:600;color:#34d399">✓ อนุมัติแล้ว</span><button data-act="adminRejectRider" data-id="${esc(r.id)}" style="padding:6px 10px;border-radius:9px;background:#0f0c18;border:1px solid rgba(255,255,255,.08);color:#9a90b0;font-size:11px;font-weight:600">ระงับ</button></div>`}
+    </div>`;
+    const riderSection = isAdmin ? `
+      <div style="background:#15111f;border:1px solid rgba(139,92,246,.25);border-radius:16px;padding:16px;margin-bottom:18px">
+        <div style="font-size:14px;font-weight:600;color:#f2eefb;margin-bottom:4px">🛵 คำขอสมัครคนส่งของ${pendingRiders.length ? ` <span style="color:#fbbf24">(${pendingRiders.length} รออนุมัติ)</span>` : ''}</div>
+        <div style="font-size:11.5px;color:#9a90b0;margin-bottom:12px">อนุมัติเพื่อให้เข้าใช้งานหน้าออเดอร์ได้</div>
+        ${pendingRiders.length ? pendingRiders.map((r) => riderCard(r, true)).join('') : `<div style="color:#6a6280;font-size:12.5px;text-align:center;padding:8px 0">ไม่มีคำขอใหม่</div>`}
+        ${approvedRiders.length ? `<div style="font-size:12px;color:#9a90b0;margin:10px 0 8px">คนส่งของที่อนุมัติแล้ว (${approvedRiders.length})</div>${approvedRiders.map((r) => riderCard(r, false)).join('')}` : ''}
+      </div>` : '';
+    // ฟอร์มเพิ่มของรางวัล
+    const rwPreview = S.nrImageData ? `<div style="margin-top:9px;display:flex;align-items:center;gap:8px"><img src="${esc(S.nrImageData)}" style="width:44px;height:44px;border-radius:9px;object-fit:cover"><span style="font-size:12px;color:#9a90b0">${esc(S.nrImageName)}</span></div>` : '';
+    const addForm = isAdmin ? `
+      <div style="background:#15111f;border:1px solid rgba(139,92,246,.25);border-radius:16px;padding:16px;margin-bottom:18px">
+        <div style="font-size:14px;font-weight:600;color:#f2eefb;margin-bottom:12px">🎁 เพิ่มของรางวัล</div>
+        <input data-model="nrName" placeholder="ชื่อของรางวัล" style="width:100%;height:46px;border-radius:11px;border:1.5px solid rgba(255,255,255,.1);background:#0f0c18;padding:0 14px;font-size:14px;color:#f2eefb;outline:none;margin-bottom:9px">
+        <input data-model="nrDesc" placeholder="คำอธิบาย (ไม่บังคับ)" style="width:100%;height:46px;border-radius:11px;border:1.5px solid rgba(255,255,255,.1);background:#0f0c18;padding:0 14px;font-size:14px;color:#f2eefb;outline:none;margin-bottom:9px">
+        <div style="display:flex;gap:9px;margin-bottom:9px">
+          <input data-model="nrCost" inputmode="numeric" placeholder="ใช้กี่แต้ม" style="flex:1;height:46px;border-radius:11px;border:1.5px solid rgba(255,255,255,.1);background:#0f0c18;padding:0 14px;font-size:14px;color:#f2eefb;outline:none">
+          <input data-model="nrStock" inputmode="numeric" placeholder="จำนวน" style="width:90px;height:46px;border-radius:11px;border:1.5px solid rgba(255,255,255,.1);background:#0f0c18;padding:0 14px;font-size:14px;color:#f2eefb;outline:none">
+          <input data-model="nrEmoji" placeholder="🎁" style="width:64px;height:46px;border-radius:11px;border:1.5px solid rgba(255,255,255,.1);background:#0f0c18;text-align:center;font-size:18px;color:#f2eefb;outline:none">
+        </div>
+        <label style="display:flex;align-items:center;justify-content:center;gap:8px;height:46px;border-radius:11px;border:1.5px dashed rgba(139,92,246,.5);background:rgba(139,92,246,.08);color:#c4b5fd;font-size:14px;font-weight:600;cursor:pointer">📷 อัปโหลดรูป (ไม่บังคับ)<input type="file" accept="image/*" data-file="reward" style="display:none"></label>
+        ${rwPreview}
+        <button data-act="adminAddReward" style="width:100%;height:48px;border-radius:12px;background:${BTN};color:#fff;font-size:15px;font-weight:600;margin-top:12px">บันทึกของรางวัล</button>
+      </div>` : '';
+    const rwList = S.rewards.length ? S.rewards.map((rw) => `
+      <div style="background:#1a1626;border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:12px;margin-bottom:10px;display:flex;align-items:center;gap:12px">
+        <div style="width:46px;height:46px;border-radius:11px;overflow:hidden;flex:none">${rw.image ? `<img src="${esc(rw.image)}" style="width:100%;height:100%;object-fit:cover">` : `<div style="width:100%;height:100%;background:rgba(139,92,246,.12);display:flex;align-items:center;justify-content:center;font-size:22px">${esc(rw.emoji || '🎁')}</div>`}</div>
+        <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#f2eefb">${esc(rw.name)}</div><div style="font-size:12px;color:#9a90b0">⭐ ${rw.pointsCost} แต้ม · เหลือ ${rw.stock || 0}</div></div>
+        ${isAdmin ? `<button data-act="adminDeleteReward" data-id="${esc(rw.id)}" style="padding:7px 12px;border-radius:10px;background:rgba(248,113,113,.14);color:#f87171;font-size:12px;font-weight:600">ลบ</button>` : ''}
+      </div>`).join('') : `<div style="color:#6a6280;font-size:13px;text-align:center;padding:16px 0">ยังไม่มีของรางวัล</div>`;
+    // คำขอแลกรางวัล
+    const reds = S.adminRedemptions || [];
+    const redLabel = { pending: '⏳ รอจัดส่ง', delivered: '✓ ได้รับแล้ว', cancelled: '✕ ยกเลิก' };
+    const redList = reds.length ? reds.map((r) => `
+      <div style="background:#1a1626;border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:13px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:13.5px;font-weight:600;color:#f2eefb">${esc(r.rewardName)}</div><div style="font-size:12px;color:#c9c2da;margin-top:2px">${esc(r.customerName || '')} · ${esc(r.phone || '-')}</div><div style="font-size:11px;color:#6a6280;margin-top:1px">${esc(fmtDate(r.createdAt))} · ${r.pointsCost} แต้ม</div></div><span style="font-size:12px;font-weight:600;color:${r.status === 'delivered' ? '#34d399' : r.status === 'cancelled' ? '#f87171' : '#fbbf24'};white-space:nowrap">${redLabel[r.status] || r.status}</span></div>
+        ${r.status === 'pending' ? `<div style="display:flex;gap:7px;margin-top:10px"><button data-act="adminSetRedemption" data-id="${esc(r.id)}" data-status="delivered" style="flex:1;height:36px;border-radius:10px;background:rgba(52,211,153,.16);color:#34d399;font-size:12.5px;font-weight:600">ทำเครื่องหมายว่าจัดส่งแล้ว</button><button data-act="adminSetRedemption" data-id="${esc(r.id)}" data-status="cancelled" style="width:90px;height:36px;border-radius:10px;background:rgba(248,113,113,.14);color:#f87171;font-size:12.5px;font-weight:600">ยกเลิก</button></div>` : ''}
+      </div>`).join('') : `<div style="color:#6a6280;font-size:13px;text-align:center;padding:16px 0">ยังไม่มีการแลกรางวัล</div>`;
+    content = `
+      ${riderSection}
+      ${addForm}
+      <div style="font-size:14px;font-weight:600;color:#f2eefb;margin-bottom:12px">ของรางวัลทั้งหมด (${S.rewards.length})</div>${rwList}
+      <div style="font-size:14px;font-weight:600;color:#f2eefb;margin:20px 0 12px">คำขอแลกรางวัล (${reds.length})</div>${redList}`;
   } else {
     const f = S.orderFilter;
     const filtered = S.adminOrders.filter((o) => {
@@ -1011,7 +1214,7 @@ function screenAdmin() {
         <div><div style="color:#fff;font-size:19px;font-weight:700">${rider ? '🛵 คนส่งของ' : 'แผงผู้ดูแลระบบ'}</div><div style="color:#c4b5fd;font-size:12px;margin-top:2px">FLASH KRATOM · ${esc((S.user && S.user.fullname) || '')}</div></div>
         <button data-act="logout" style="padding:0 14px;height:34px;border-radius:17px;border:1px solid rgba(255,255,255,.35);color:#fff;font-size:12px;font-weight:600">ออก</button>
       </div>
-      ${rider ? '' : `<div style="display:flex;gap:7px;margin-top:16px">${tabBtn('orders', 'ออเดอร์')}${tabBtn('products', 'สินค้า')}${tabBtn('sales', 'ยอดขาย')}</div>`}
+      ${rider ? '' : `<div style="display:flex;gap:7px;margin-top:16px">${tabBtn('orders', 'ออเดอร์')}${tabBtn('products', 'สินค้า')}${tabBtn('rewards', 'รางวัล')}${tabBtn('sales', 'ยอดขาย')}</div>`}
     </div>
     <div style="flex:1;overflow-y:auto;padding:18px">${content}</div>
   </div>`;
@@ -1038,6 +1241,15 @@ const ACT = {
   goHome: () => go('home'), goMethod: () => go('method'), goMap: () => go('map'), goSaved: () => go('saved'),
   goCart: () => go('cart'), goCheckout: () => { if (needsPhone()) { toast('กรุณายืนยันเบอร์โทรก่อนสั่งซื้อ'); showPhonePopup(true); return; } go('checkout'); }, goOrders: () => go('orders'),
   goProfile: () => { S.pfName = (S.user && S.user.fullname) || ''; S.pfPhone = (S.user && S.user.phone) || ''; S.pfAvatarData = ''; go('profile'); },
+  goRewards: () => go('rewards'), goRiderRegister: () => go('riderRegister'),
+  openMenu: () => showMenuDrawer(),
+  doRiderRegister, redeem: (el) => redeemReward(el.dataset.id),
+  riderEnter: () => go('orders'),
+  riderRefresh: async () => { try { const me = await API.get('/api/me'); if (me && me.user) { S.user = me.user; if (me.user.approved) { toast('ได้รับอนุมัติแล้ว ✓'); go('orders'); return; } } toast('ยังอยู่ระหว่างรออนุมัติ'); } catch (e) { toast(e.message); } },
+  adminAddReward, adminDeleteReward: (el) => adminDeleteReward(el.dataset.id),
+  adminSetRedemption: (el) => adminSetRedemption(el.dataset.id, el.dataset.status),
+  adminApproveRider: (el) => adminApproveRider(el.dataset.id), adminRejectRider: (el) => adminRejectRider(el.dataset.id),
+  adminTab_rewards: () => { S.adminTab = 'rewards'; render(); },
   saveProfile, adminSaveSettings,
   adminOpenOrder: (el) => { S.adminOrderId = el.dataset.id; render(); },
   adminCloseOrder: () => { S.adminOrderId = null; render(); },
@@ -1096,7 +1308,7 @@ function render() {
   const key = renderKey();
   const keepScroll = key === lastRenderKey;
   const savedScroll = keepScroll ? (currentScrollEl() ? currentScrollEl().scrollTop : 0) : 0;
-  const screens = { welcome: screenWelcome, register: screenRegister, login: screenLogin, otp: screenOtp, home: screenHome, method: screenMethod, map: screenMap, saved: screenSaved, profile: screenProfile, cart: screenCart, checkout: screenCheckout, orders: screenOrders, admin: screenAdmin };
+  const screens = { welcome: screenWelcome, register: screenRegister, login: screenLogin, otp: screenOtp, home: screenHome, method: screenMethod, map: screenMap, saved: screenSaved, profile: screenProfile, rewards: screenRewards, riderRegister: screenRiderRegister, riderPending: screenRiderPending, cart: screenCart, checkout: screenCheckout, orders: screenOrders, admin: screenAdmin };
   if (S.screen === 'checkout' && !S.checkoutAddressId && S.saved.length) S.checkoutAddressId = S.saved[0].id;
   $('#screen').innerHTML = (screens[S.screen] || screenWelcome)();
   $('#nav').innerHTML = S.screen === 'admin' ? '' : navBar();
@@ -1121,6 +1333,7 @@ function wire() {
       reader.onload = () => {
         const data = reader.result, target = el.dataset.file;
         if (target === 'new') { S.npImageData = data; S.npImageName = f.name; render(); }
+        else if (target === 'reward') { S.nrImageData = data; S.nrImageName = f.name; render(); }
         else if (target === 'avatar') { S.pfAvatarData = data; render(); }
         else if (target === 'ad') adminSaveAd({ adImageData: data });
         else if (target === 'banner') adminSaveAd({ addBannerData: data });
@@ -1212,7 +1425,8 @@ async function boot() {
   if (API.token) {
     try {
       const me = await API.get('/api/me'); S.user = me.user;
-      if (isStaff()) { S.adminTab = 'orders'; await adminLoad(); S.screen = 'admin'; }
+      if (S.user && S.user.role === 'rider' && !S.user.approved) { S.screen = 'riderPending'; }
+      else if (isStaff()) { S.adminTab = 'orders'; await adminLoad(); S.screen = 'admin'; }
       else { await loadUserData(); S.screen = 'home'; }
     } catch { API.setToken(''); S.screen = 'welcome'; }
   } else { await loadProducts(); }

@@ -127,6 +127,14 @@ function seedProducts() {
   ];
 }
 const defaultSettings = () => ({ deliveryFee: 20, freeQty: 2, adImage: 'assets/banner.jpg', adEnabled: true, banners: ['assets/banner.jpg'] });
+const pointsForTotal = (total) => Math.floor((Number(total) || 0) / 10); // สะสมแต้ม: ทุก 10 บาท = 1 แต้ม
+function seedRewards() {
+  return [
+    { id: 'rw1', name: 'ส่วนลด ฿20', desc: 'คูปองส่วนลดค่าสินค้า', pointsCost: 50, emoji: '🎟️', image: null, stock: 100, createdAt: now() },
+    { id: 'rw2', name: 'ส่งฟรี 1 ครั้ง', desc: 'ยกเว้นค่าจัดส่ง 1 ออเดอร์', pointsCost: 30, emoji: '🚚', image: null, stock: 100, createdAt: now() + 1 },
+    { id: 'rw3', name: 'ของแถมสุ่ม 1 ชิ้น', desc: 'รับของแถมพิเศษจากทางร้าน', pointsCost: 80, emoji: '🎁', image: null, stock: 50, createdAt: now() + 2 }
+  ];
+}
 
 // ==================================================================
 // Store — persistence layer. Two backends, same async interface.
@@ -146,7 +154,7 @@ function makeFileStore() {
     const add = (phone, password, fullname, role) => {
       if (db.users.find((u) => u.phone === phone)) return null;
       const { salt, hash } = hashPassword(password);
-      const u = { id: uid('u_'), fullname, phone, salt, hash, verified: true, role, lineUserId: null, avatar: '', createdAt: now() };
+      const u = { id: uid('u_'), fullname, phone, salt, hash, verified: true, role, lineUserId: null, avatar: '', points: 0, approved: true, createdAt: now() };
       db.users.push(u); return u;
     };
     const demo = add('0800000000', 'demo1234', 'ลูกค้าทดลอง', 'customer');
@@ -158,10 +166,11 @@ function makeFileStore() {
     async init() {
       try {
         db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-        for (const k of ['users', 'otps', 'addresses', 'products', 'orders', 'settings']) if (!db[k]) db[k] = k === 'products' ? seedProducts() : k === 'settings' ? defaultSettings() : [];
+        for (const k of ['users', 'otps', 'addresses', 'products', 'orders', 'settings', 'rewards', 'redemptions']) if (!db[k]) db[k] = k === 'products' ? seedProducts() : k === 'settings' ? defaultSettings() : k === 'rewards' ? seedRewards() : [];
         if (!db.products.length) db.products = seedProducts();
-      } catch { db = { users: [], otps: [], addresses: [], products: seedProducts(), orders: [], settings: defaultSettings() }; }
+      } catch { db = { users: [], otps: [], addresses: [], products: seedProducts(), orders: [], settings: defaultSettings(), rewards: seedRewards(), redemptions: [] }; }
       for (const p of db.products) { if (typeof p.stock !== 'number') p.stock = 20; if (p.image === undefined) p.image = null; }
+      for (const u of db.users) { if (typeof u.points !== 'number') u.points = 0; if (typeof u.approved !== 'boolean') u.approved = true; }
       Object.assign(db.settings, { ...defaultSettings(), ...db.settings });
       seedAccountsSync();
       persist();
@@ -198,6 +207,20 @@ function makeFileStore() {
     async insertOrder(o) { db.orders.push(o); persist(); return o; },
     async updateOrder(id, patch) { const o = db.orders.find((x) => x.id === id); if (!o) return null; Object.assign(o, patch); persist(); return o; },
 
+    async getRewards() { return [...db.rewards].sort((a, b) => a.createdAt - b.createdAt); },
+    async getRewardById(id) { return db.rewards.find((r) => r.id === id) || null; },
+    async insertReward(r) { db.rewards.push(r); persist(); return r; },
+    async updateReward(id, patch) { const r = db.rewards.find((x) => x.id === id); if (!r) return null; Object.assign(r, patch); persist(); return r; },
+    async deleteReward(id) { const before = db.rewards.length; db.rewards = db.rewards.filter((r) => r.id !== id); persist(); return db.rewards.length !== before; },
+
+    async getRedemptionsByUser(userId) { return db.redemptions.filter((x) => x.userId === userId).sort((a, b) => b.createdAt - a.createdAt); },
+    async getAllRedemptions() { return [...db.redemptions].sort((a, b) => b.createdAt - a.createdAt); },
+    async getRedemptionById(id) { return db.redemptions.find((x) => x.id === id) || null; },
+    async insertRedemption(x) { db.redemptions.push(x); persist(); return x; },
+    async updateRedemption(id, patch) { const x = db.redemptions.find((r) => r.id === id); if (!x) return null; Object.assign(x, patch); persist(); return x; },
+
+    async getRiders() { return db.users.filter((u) => u.role === 'rider').sort((a, b) => b.createdAt - a.createdAt).map((u) => ({ id: u.id, fullname: u.fullname, phone: u.phone, approved: !!u.approved, createdAt: u.createdAt })); },
+
     async uploadImage(idHint, dataUrl) {
       const m = /^data:(image\/(png|jpe?g|webp|gif));base64,(.+)$/.exec(dataUrl || '');
       if (!m) return null;
@@ -232,14 +255,18 @@ function makeSupabaseStore() {
   const enc = (v) => encodeURIComponent(v);
 
   // ---- แปลง row (snake_case จาก Postgres) <-> object (camelCase ที่ API/ฝั่งหน้าเว็บใช้) ----
-  const userOut = (r) => !r ? null : ({ id: r.id, fullname: r.fullname, phone: r.phone || '', email: r.email || '', salt: r.salt, hash: r.hash, verified: r.verified, role: r.role, lineUserId: r.line_user_id, avatar: r.avatar || '', createdAt: r.created_at });
-  const userIn = (u) => ({ id: u.id, fullname: u.fullname, phone: u.phone || null, email: u.email || null, salt: u.salt || null, hash: u.hash || null, verified: !!u.verified, role: u.role, line_user_id: u.lineUserId || null, avatar: u.avatar || '', created_at: u.createdAt });
+  const userOut = (r) => !r ? null : ({ id: r.id, fullname: r.fullname, phone: r.phone || '', email: r.email || '', salt: r.salt, hash: r.hash, verified: r.verified, role: r.role, lineUserId: r.line_user_id, avatar: r.avatar || '', points: r.points || 0, approved: r.approved !== false, createdAt: r.created_at });
+  const userIn = (u) => ({ id: u.id, fullname: u.fullname, phone: u.phone || null, email: u.email || null, salt: u.salt || null, hash: u.hash || null, verified: !!u.verified, role: u.role, line_user_id: u.lineUserId || null, avatar: u.avatar || '', points: u.points || 0, approved: u.approved !== false, created_at: u.createdAt });
+  const rewardOut = (r) => !r ? null : ({ id: r.id, name: r.name, desc: r.description || '', pointsCost: r.points_cost, emoji: r.emoji, image: r.image, stock: r.stock, createdAt: r.created_at });
+  const rewardIn = (x) => ({ id: x.id, name: x.name, description: x.desc || '', points_cost: x.pointsCost, emoji: x.emoji, image: x.image, stock: x.stock, created_at: x.createdAt });
+  const redOut = (r) => !r ? null : ({ id: r.id, userId: r.user_id, customerName: r.customer_name || '', phone: r.phone || '', rewardId: r.reward_id, rewardName: r.reward_name, pointsCost: r.points_cost, status: r.status, createdAt: r.created_at });
+  const redIn = (x) => ({ id: x.id, user_id: x.userId, customer_name: x.customerName || '', phone: x.phone || '', reward_id: x.rewardId, reward_name: x.rewardName, points_cost: x.pointsCost, status: x.status, created_at: x.createdAt });
   const addrOut = (r) => !r ? null : ({ id: r.id, userId: r.user_id, label: r.label, kind: r.kind, text: r.text, detail: r.detail || '', lat: r.lat, lng: r.lng, createdAt: r.created_at });
   const addrIn = (a) => ({ id: a.id, user_id: a.userId, label: a.label, kind: a.kind, text: a.text, detail: a.detail || '', lat: a.lat, lng: a.lng, created_at: a.createdAt });
   const prodOut = (r) => !r ? null : ({ id: r.id, name: r.name, desc: r.description || '', price: r.price, emoji: r.emoji, tag: r.tag || '', image: r.image, stock: r.stock });
   const prodIn = (p) => ({ id: p.id, name: p.name, description: p.desc || '', price: p.price, emoji: p.emoji, tag: p.tag || '', image: p.image, stock: p.stock, created_at: p.createdAt || now() });
-  const orderOut = (r) => !r ? null : ({ id: r.id, userId: r.user_id, customerName: r.customer_name || '', phone: r.phone || '', customerSource: r.customer_source || 'phone', items: r.items || [], subtotal: r.subtotal, deliveryFee: r.delivery_fee, total: r.total, addressId: r.address_id, addressText: r.address_text, addrLat: r.addr_lat, addrLng: r.addr_lng, addrDetail: r.addr_detail || '', payment: r.payment || {}, slipImage: r.slip_image, status: r.status, statusHistory: r.status_history || [], createdAt: r.created_at });
-  const orderIn = (o) => ({ id: o.id, user_id: o.userId, customer_name: o.customerName || '', phone: o.phone || '', customer_source: o.customerSource || 'phone', items: o.items, subtotal: o.subtotal, delivery_fee: o.deliveryFee, total: o.total, address_id: o.addressId, address_text: o.addressText, addr_lat: o.addrLat, addr_lng: o.addrLng, addr_detail: o.addrDetail || '', payment: o.payment, slip_image: o.slipImage, status: o.status, status_history: o.statusHistory, created_at: o.createdAt });
+  const orderOut = (r) => !r ? null : ({ id: r.id, userId: r.user_id, customerName: r.customer_name || '', phone: r.phone || '', customerSource: r.customer_source || 'phone', items: r.items || [], subtotal: r.subtotal, deliveryFee: r.delivery_fee, total: r.total, addressId: r.address_id, addressText: r.address_text, addrLat: r.addr_lat, addrLng: r.addr_lng, addrDetail: r.addr_detail || '', payment: r.payment || {}, slipImage: r.slip_image, pointsEarned: r.points_earned || 0, status: r.status, statusHistory: r.status_history || [], createdAt: r.created_at });
+  const orderIn = (o) => ({ id: o.id, user_id: o.userId, customer_name: o.customerName || '', phone: o.phone || '', customer_source: o.customerSource || 'phone', items: o.items, subtotal: o.subtotal, delivery_fee: o.deliveryFee, total: o.total, address_id: o.addressId, address_text: o.addressText, addr_lat: o.addrLat, addr_lng: o.addrLng, addr_detail: o.addrDetail || '', payment: o.payment, slip_image: o.slipImage, points_earned: o.pointsEarned || 0, status: o.status, status_history: o.statusHistory, created_at: o.createdAt });
   const settOut = (r) => ({ deliveryFee: r.delivery_fee, freeQty: r.free_qty, adImage: r.ad_image, adEnabled: r.ad_enabled, banners: (r.banners && r.banners.length) ? r.banners : ['assets/banner.jpg'] });
 
   async function seedAccountsAsync() {
@@ -272,6 +299,8 @@ function makeSupabaseStore() {
       Store.products = rows.map(prodOut);
       const s = await sb('GET', '/rest/v1/settings?id=eq.1&select=*');
       Store.settings = s && s[0] ? settOut(s[0]) : defaultSettings();
+      const rw = await sb('GET', '/rest/v1/rewards?select=id&limit=1');
+      if (!rw.length) { await sb('POST', '/rest/v1/rewards', seedRewards().map(rewardIn), { Prefer: 'return=minimal' }); }
       await seedAccountsAsync.call(this);
     },
     async getUserByPhone(phone) { const r = await sb('GET', '/rest/v1/users?phone=eq.' + enc(phone) + '&select=*&limit=1'); return userOut(r[0]); },
@@ -287,6 +316,8 @@ function makeSupabaseStore() {
       if (patch.verified !== undefined) row.verified = patch.verified;
       if (patch.salt !== undefined) row.salt = patch.salt;
       if (patch.hash !== undefined) row.hash = patch.hash;
+      if (patch.points !== undefined) row.points = patch.points;
+      if (patch.approved !== undefined) row.approved = patch.approved;
       const r = await sb('PATCH', '/rest/v1/users?id=eq.' + enc(id), row);
       return userOut(r[0]);
     },
@@ -357,6 +388,20 @@ function makeSupabaseStore() {
       const r = await sb('PATCH', '/rest/v1/orders?id=eq.' + enc(id), row);
       return orderOut(r[0]);
     },
+
+    async getRewards() { const r = await sb('GET', '/rest/v1/rewards?select=*&order=created_at.asc'); return r.map(rewardOut); },
+    async getRewardById(id) { const r = await sb('GET', '/rest/v1/rewards?id=eq.' + enc(id) + '&select=*&limit=1'); return rewardOut(r[0]); },
+    async insertReward(x) { const r = await sb('POST', '/rest/v1/rewards', rewardIn(x)); return rewardOut(r[0]); },
+    async updateReward(id, patch) { const row = {}; if (patch.stock !== undefined) row.stock = patch.stock; const r = await sb('PATCH', '/rest/v1/rewards?id=eq.' + enc(id), row); return rewardOut(r[0]); },
+    async deleteReward(id) { const r = await sb('DELETE', '/rest/v1/rewards?id=eq.' + enc(id)); return r.length > 0; },
+
+    async getRedemptionsByUser(userId) { const r = await sb('GET', '/rest/v1/redemptions?user_id=eq.' + enc(userId) + '&select=*&order=created_at.desc'); return r.map(redOut); },
+    async getAllRedemptions() { const r = await sb('GET', '/rest/v1/redemptions?select=*&order=created_at.desc'); return r.map(redOut); },
+    async getRedemptionById(id) { const r = await sb('GET', '/rest/v1/redemptions?id=eq.' + enc(id) + '&select=*&limit=1'); return redOut(r[0]); },
+    async insertRedemption(x) { const r = await sb('POST', '/rest/v1/redemptions', redIn(x)); return redOut(r[0]); },
+    async updateRedemption(id, patch) { const row = {}; if (patch.status !== undefined) row.status = patch.status; const r = await sb('PATCH', '/rest/v1/redemptions?id=eq.' + enc(id), row); return redOut(r[0]); },
+
+    async getRiders() { const r = await sb('GET', '/rest/v1/users?role=eq.rider&select=id,fullname,phone,approved,created_at&order=created_at.desc'); return r.map((u) => ({ id: u.id, fullname: u.fullname, phone: u.phone, approved: u.approved !== false, createdAt: u.created_at })); },
 
     async uploadImage(idHint, dataUrl) {
       const m = /^data:(image\/(png|jpe?g|webp|gif));base64,(.+)$/.exec(dataUrl || '');
@@ -465,8 +510,8 @@ async function getAuthUser(req) {
 function invalidateAuthCache(id) { authCache.delete(id); }
 async function requireAdmin(req) { const u = await getAuthUser(req); return u && u.role === 'admin' ? u : null; }
 // พนักงาน = แอดมิน หรือ คนส่งของ (rider) — เห็นหน้าออเดอร์ + อัปเดตสถานะได้
-async function requireStaff(req) { const u = await getAuthUser(req); return u && (u.role === 'admin' || u.role === 'rider') ? u : null; }
-const publicUser = (u) => ({ id: u.id, fullname: u.fullname, phone: u.phone || '', email: u.email || '', verified: u.verified, role: u.role || 'customer', avatar: u.avatar || '', lineLinked: !!u.lineUserId });
+async function requireStaff(req) { const u = await getAuthUser(req); return u && (u.role === 'admin' || (u.role === 'rider' && u.approved !== false)) ? u : null; }
+const publicUser = (u) => ({ id: u.id, fullname: u.fullname, phone: u.phone || '', email: u.email || '', verified: u.verified, role: u.role || 'customer', approved: u.approved !== false, points: u.points || 0, avatar: u.avatar || '', lineLinked: !!u.lineUserId });
 const isEmail = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(s || '').trim());
 const query = (req) => new URL(req.url, 'http://x').searchParams;
 const productById = (id) => Store.products.find((p) => p.id === id);
@@ -541,6 +586,21 @@ route('GET', '/api/me', async (req, res) => {
   const u = await getAuthUser(req);
   if (!u) return send(res, 401, { error: 'unauthorized' });
   send(res, 200, { user: publicUser(u) });
+});
+
+// ---- สมัครเป็นคนส่งของ (rider) — ต้องรอแอดมินอนุมัติก่อนถึงใช้งานได้ ----
+route('POST', '/api/auth/rider/register', async (req, res, body) => {
+  const fullname = String(body.fullname || '').trim();
+  const phone = normPhone(body.phone);
+  const password = String(body.password || '');
+  if (!fullname) return send(res, 400, { error: 'กรุณากรอกชื่อ-นามสกุล' });
+  if (phone.length < 9) return send(res, 400, { error: 'เบอร์โทรไม่ถูกต้อง' });
+  if (password.length < 6) return send(res, 400, { error: 'รหัสผ่านอย่างน้อย 6 ตัวอักษร' });
+  if (await Store.phoneTaken(phone)) return send(res, 409, { error: 'เบอร์นี้ถูกใช้แล้ว' });
+  const { salt, hash } = hashPassword(password);
+  const user = await Store.insertUser({ id: uid('u_'), fullname, phone, salt, hash, verified: true, role: 'rider', approved: false, points: 0, lineUserId: null, avatar: '', createdAt: now() });
+  notifyShop(`🛵 มีคนสมัครเป็นคนส่งของ: ${fullname} (${phone}) — รออนุมัติ`);
+  send(res, 200, { ok: true, token: sign({ uid: user.id }), user: publicUser(user) });
 });
 
 // ---- LINE Login (OAuth 2.0) ----
@@ -777,21 +837,26 @@ route('POST', '/api/orders', async (req, res, body) => {
   const deliveryFee = totalQty >= (Store.settings.freeQty || 2) ? 0 : (Store.settings.deliveryFee || 0);
   const addr = body.addressId ? await Store.getAddressById(body.addressId, u.id) : null;
   const payMethod = ['cod', 'transfer'].includes(body.payment && body.payment.method) ? body.payment.method : 'cod';
+  const total = subtotal + deliveryFee;
+  const pointsEarned = pointsForTotal(total);
   const order = {
     id: uid('o_'), userId: u.id, customerName: u.fullname, phone: u.phone || '',
     customerSource: u.lineUserId ? 'line' : 'phone', // ลูกค้ามาจากไลน์ หรือ สมัครสมาชิก(เบอร์)
-    items: detailed, subtotal, deliveryFee, total: subtotal + deliveryFee,
+    items: detailed, subtotal, deliveryFee, total,
     addressId: addr ? addr.id : null, addressText: addr ? addr.text : (body.addressText || null),
     addrLat: addr ? addr.lat : null, addrLng: addr ? addr.lng : null, addrDetail: addr ? addr.detail : '',
     payment: { method: payMethod, note: String((body.payment && body.payment.note) || '').slice(0, 200) },
-    slipImage: null,
+    slipImage: null, pointsEarned,
     status: 'received', statusHistory: [{ status: 'received', at: now() }], createdAt: now()
   };
   const saved = await Store.insertOrder(order);
+  // สะสมแต้มให้ลูกค้า
+  if (pointsEarned > 0) await Store.updateUser(u.id, { points: (u.points || 0) + pointsEarned });
+  invalidateAuthCache(u.id);
   broadcastProducts();
   notifyShop(`🛵 ออเดอร์ใหม่ #${shortId(saved.id)}\nลูกค้า: ${saved.customerName}${saved.phone ? ' (' + saved.phone + ')' : ''}\nรายการ: ${detailed.map((d) => d.name + ' x' + d.qty).join(', ')}\nยอดรวม: ฿${saved.total}\nส่งที่: ${saved.addressText || '-'}`);
-  notifyUser(u, `✅ รับออเดอร์ #${shortId(saved.id)} แล้ว\nยอดรวม ฿${saved.total}\nเราจะแจ้งเมื่อสถานะเปลี่ยนแปลง`);
-  send(res, 200, { ok: true, order: saved });
+  notifyUser(u, `✅ รับออเดอร์ #${shortId(saved.id)} แล้ว\nยอดรวม ฿${saved.total}${pointsEarned ? ' · +' + pointsEarned + ' แต้ม' : ''}\nเราจะแจ้งเมื่อสถานะเปลี่ยนแปลง`);
+  send(res, 200, { ok: true, order: saved, points: (u.points || 0) + pointsEarned });
 });
 route('GET', '/api/orders', async (req, res) => {
   const u = await getAuthUser(req); if (!u) return send(res, 401, { error: 'unauthorized' });
@@ -809,6 +874,27 @@ route('POST', '/api/orders/slip', async (req, res, body) => {
   send(res, 200, { ok: true, order: updated });
 });
 
+// ---- แต้มสะสม + แลกของรางวัล (ลูกค้า) ----
+route('GET', '/api/rewards', async (req, res) => send(res, 200, { rewards: await Store.getRewards() }));
+route('GET', '/api/redemptions', async (req, res) => {
+  const u = await getAuthUser(req); if (!u) return send(res, 401, { error: 'unauthorized' });
+  send(res, 200, { redemptions: await Store.getRedemptionsByUser(u.id) });
+});
+route('POST', '/api/rewards/redeem', async (req, res, body) => {
+  const u = await getAuthUser(req); if (!u) return send(res, 401, { error: 'unauthorized' });
+  const rw = await Store.getRewardById(body.rewardId);
+  if (!rw) return send(res, 404, { error: 'ไม่พบของรางวัล' });
+  if ((rw.stock || 0) <= 0) return send(res, 409, { error: 'ของรางวัลหมดแล้ว' });
+  if ((u.points || 0) < rw.pointsCost) return send(res, 400, { error: 'แต้มสะสมไม่พอ (ต้องใช้ ' + rw.pointsCost + ' แต้ม)' });
+  const newPoints = (u.points || 0) - rw.pointsCost;
+  await Store.updateUser(u.id, { points: newPoints });
+  invalidateAuthCache(u.id);
+  await Store.updateReward(rw.id, { stock: Math.max(0, (rw.stock || 0) - 1) });
+  const redemption = await Store.insertRedemption({ id: uid('rd_'), userId: u.id, customerName: u.fullname, phone: u.phone || '', rewardId: rw.id, rewardName: rw.name, pointsCost: rw.pointsCost, status: 'pending', createdAt: now() });
+  notifyShop(`🎁 ลูกค้าแลกของรางวัล: ${rw.name}\nลูกค้า: ${u.fullname} (${u.phone || '-'})`);
+  send(res, 200, { ok: true, redemption, points: newPoints });
+});
+
 // ---- Admin / Staff (แอดมิน + คนส่งของ เห็นออเดอร์ได้) ----
 route('GET', '/api/admin/orders', async (req, res) => {
   if (!await requireStaff(req)) return send(res, 403, { error: 'เฉพาะพนักงาน' });
@@ -822,8 +908,13 @@ route('POST', '/api/admin/orders/status', async (req, res, body) => {
   if (!STATUS_LABEL[body.status]) return send(res, 400, { error: 'สถานะไม่ถูกต้อง' });
   const history = [...(order.statusHistory || []), { status: body.status, at: now() }];
   const updated = await Store.updateOrder(order.id, { status: body.status, statusHistory: history });
-  notifyShop(`📦 ออเดอร์ #${shortId(order.id)} -> ${STATUS_LABEL[body.status]}\nลูกค้า: ${order.customerName}`);
   const owner = await Store.getUserById(order.userId);
+  // ยกเลิกออเดอร์ -> คืนแต้มที่เคยได้จากออเดอร์นี้
+  if (body.status === 'cancelled' && order.pointsEarned > 0 && owner) {
+    await Store.updateUser(owner.id, { points: Math.max(0, (owner.points || 0) - order.pointsEarned) });
+    invalidateAuthCache(owner.id);
+  }
+  notifyShop(`📦 ออเดอร์ #${shortId(order.id)} -> ${STATUS_LABEL[body.status]}\nลูกค้า: ${order.customerName}`);
   notifyUser(owner, `📦 ออเดอร์ #${shortId(order.id)} ของคุณ\nสถานะ: ${STATUS_LABEL[body.status]}`);
   send(res, 200, { ok: true, order: updated });
 });
@@ -885,6 +976,60 @@ route('DELETE', '/api/admin/products', async (req, res, body) => {
   const ok = await Store.deleteProduct(body.id);
   if (!ok) return send(res, 404, { error: 'ไม่พบสินค้า' });
   broadcastProducts();
+  send(res, 200, { ok: true });
+});
+
+// ---- Admin: ของรางวัล ----
+route('POST', '/api/admin/rewards', async (req, res, body) => {
+  if (!await requireAdmin(req)) return send(res, 403, { error: 'เฉพาะผู้ดูแลระบบ' });
+  const name = String(body.name || '').trim();
+  const pointsCost = Number(body.pointsCost);
+  if (!name) return send(res, 400, { error: 'กรุณากรอกชื่อของรางวัล' });
+  if (!(pointsCost >= 1)) return send(res, 400, { error: 'แต้มที่ใช้แลกไม่ถูกต้อง' });
+  const id = 'rw_' + crypto.randomBytes(4).toString('hex');
+  let image = null;
+  if (body.imageData) image = await Store.uploadImage(id, body.imageData);
+  const reward = await Store.insertReward({ id, name: name.slice(0, 60), desc: String(body.desc || '').slice(0, 120), pointsCost: Math.round(pointsCost), emoji: String(body.emoji || '🎁').slice(0, 4), image, stock: Math.max(0, Math.round(Number(body.stock) || 0)), createdAt: now() });
+  send(res, 200, { ok: true, reward });
+});
+route('DELETE', '/api/admin/rewards', async (req, res, body) => {
+  if (!await requireAdmin(req)) return send(res, 403, { error: 'เฉพาะผู้ดูแลระบบ' });
+  const ok = await Store.deleteReward(body.id);
+  if (!ok) return send(res, 404, { error: 'ไม่พบของรางวัล' });
+  send(res, 200, { ok: true });
+});
+route('GET', '/api/admin/redemptions', async (req, res) => {
+  if (!await requireStaff(req)) return send(res, 403, { error: 'เฉพาะพนักงาน' });
+  send(res, 200, { redemptions: await Store.getAllRedemptions() });
+});
+route('POST', '/api/admin/redemptions/status', async (req, res, body) => {
+  if (!await requireStaff(req)) return send(res, 403, { error: 'เฉพาะพนักงาน' });
+  const r = await Store.getRedemptionById(body.id);
+  if (!r) return send(res, 404, { error: 'ไม่พบรายการแลก' });
+  const status = ['pending', 'delivered', 'cancelled'].includes(body.status) ? body.status : 'pending';
+  const updated = await Store.updateRedemption(r.id, { status });
+  send(res, 200, { ok: true, redemption: updated });
+});
+
+// ---- Admin: อนุมัติคนส่งของ ----
+route('GET', '/api/admin/riders', async (req, res) => {
+  if (!await requireAdmin(req)) return send(res, 403, { error: 'เฉพาะผู้ดูแลระบบ' });
+  send(res, 200, { riders: await Store.getRiders() });
+});
+route('POST', '/api/admin/riders/approve', async (req, res, body) => {
+  if (!await requireAdmin(req)) return send(res, 403, { error: 'เฉพาะผู้ดูแลระบบ' });
+  const u = await Store.getUserById(body.id);
+  if (!u || u.role !== 'rider') return send(res, 404, { error: 'ไม่พบคนส่งของ' });
+  await Store.updateUser(u.id, { approved: true });
+  invalidateAuthCache(u.id);
+  send(res, 200, { ok: true });
+});
+route('POST', '/api/admin/riders/reject', async (req, res, body) => {
+  if (!await requireAdmin(req)) return send(res, 403, { error: 'เฉพาะผู้ดูแลระบบ' });
+  const u = await Store.getUserById(body.id);
+  if (!u || u.role !== 'rider') return send(res, 404, { error: 'ไม่พบคนส่งของ' });
+  await Store.updateUser(u.id, { approved: false });
+  invalidateAuthCache(u.id);
   send(res, 200, { ok: true });
 });
 
